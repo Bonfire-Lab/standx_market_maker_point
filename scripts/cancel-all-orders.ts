@@ -18,6 +18,9 @@ async function main() {
     config.standx.chain
   );
 
+  // Login to get access token
+  await auth.login();
+
   // Initialize client
   const client = new StandXClient(auth);
   await client.initialize(config.trading.symbol);
@@ -27,7 +30,7 @@ async function main() {
 
   log.info(`Found ${orders.length} open orders:`);
   orders.forEach(order => {
-    log.info(`  - ${order.side} order: ${order.orderId} @ $${order.price}`);
+    log.info(`  - ${order.side} order: ${order.orderId} @ $${order.price} (clientOrderId: ${order.clientOrderId})`);
   });
 
   // Cancel all orders

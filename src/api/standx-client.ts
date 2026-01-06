@@ -219,19 +219,22 @@ export class StandXClient {
         headers
       });
 
-      const orders = response.data;
+      // API returns { code, message, result: [...] }
+      const data = response.data;
+      const orders = data.result || data;
+
       if (!Array.isArray(orders)) {
         return [];
       }
 
       return orders.map((o: any) => ({
-        orderId: o.order_id?.toString() || o.id?.toString() || 'Unknown',
+        orderId: o.id?.toString() || o.order_id?.toString() || 'Unknown',
         clientOrderId: o.cl_ord_id || '',
         symbol: o.symbol || symbol,
         side: o.side || 'buy',
         qty: new Decimal(o.qty || 0),
         price: new Decimal(o.price || 0),
-        filledQty: new Decimal(o.cum_qty || 0),
+        filledQty: new Decimal(o.fill_qty || o.cum_qty || 0),
         status: 'OPEN'
       }));
     } catch (error) {
