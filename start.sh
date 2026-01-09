@@ -23,19 +23,20 @@ start_bot() {
 
     # Get absolute path of env file
     local env_path="$(pwd)/$env_file"
+    local log_name="$(basename $env_file .env)"
 
     pm2 start ./src/index.ts \
       --name "$app_name" \
       --interpreter "npx tsx" \
       --env ENV_FILE="$env_path" \
-      --error-file "./logs/$(basename $env_file .env)-error.log" \
-      --out-file "./logs/$(basename $env_file .env)-out.log" \
-      --log-file "./logs/$(basename $env_file .env)-combined.log" \
+      -e "./logs/${log_name}-error.log" \
+      -o "./logs/${log_name}-out.log" \
+      -l "./logs/${log_name}-combined.log" \
       --time \
       --merge-logs \
       --autorestart \
       --max-restarts 10 \
-      --min-uptime "10s" \
+      --min-uptime 10000 \
       --restart-delay 4000
 
     echo "✅ Started: $app_name"
