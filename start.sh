@@ -29,9 +29,9 @@ start_bot() {
       --name "$app_name" \
       --interpreter "npx tsx" \
       --env ENV_FILE="$env_path" \
-      --error "./logs/${log_name}-error.log" \
-      --output "./logs/${log_name}-out.log" \
-      --log "./logs/${log_name}-combined.log" \
+      --error-file "./logs/${log_name}-error.log" \
+      --out-file "./logs/${log_name}-out.log" \
+      --log-file "./logs/${log_name}-combined.log" \
       --time
 
     echo "✅ Started: $app_name"
