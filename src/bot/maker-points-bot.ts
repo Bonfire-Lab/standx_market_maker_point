@@ -25,6 +25,7 @@ export class MakerPointsBot extends EventEmitter {
   private markPrice: Decimal = Decimal(0);
   private stopRequested: boolean = false;
   private startTime: number;
+  private isProcessingFill: boolean = false;  // Flag to prevent race conditions during fill processing
 
   constructor() {
     super();
@@ -397,6 +398,12 @@ export class MakerPointsBot extends EventEmitter {
       return;
     }
 
+    // Skip if we're currently processing a fill to prevent race conditions
+    if (this.isProcessingFill) {
+      log.debug('Skipping checkAndReplaceOrders - fill processing in progress');
+      return;
+    }
+
     try {
       // SAFETY CHECK: Verify position is zero
       const currentPosition = await this.orderManager.getCurrentPosition();
@@ -465,6 +472,38 @@ export class MakerPointsBot extends EventEmitter {
       const order = side === 'buy' ? this.state.buyOrder : this.state.sellOrder;
 
       if (!order) {
+        // This can happen when the order was cleared during fill processing
+        // Just place a new order instead of replacing
+        log.info(`[${side.toUpperCase()}] No existing order to replace, placing new order...`);
+
+        if (useFreshPrice) {
+          const freshPrice = await this.client.getMarkPrice(this.config.trading.symbol);
+          log.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)}`);
+          this.markPrice = freshPrice;
+          this.state.markPrice = freshPrice;
+        }
+
+        const newPrice = this.orderManager.calculateOrderPrice(
+          side,
+          this.markPrice,
+          this.config.trading.orderDistanceBp
+        );
+
+        const newOrder = await this.orderManager.placeOrder(
+          side,
+          new Decimal(this.config.trading.orderSizeBtc),
+          newPrice
+        );
+
+        if (newOrder) {
+          if (side === 'buy') {
+            this.state.buyOrder = newOrder;
+          } else {
+            this.state.sellOrder = newOrder;
+          }
+          this.state.stats.ordersPlaced++;
+          log.info(`[${side.toUpperCase()}] New order placed: ${newOrder.orderId} @ $${newOrder.price.toFixed(2)}`);
+        }
         return;
       }
 
@@ -535,10 +574,19 @@ export class MakerPointsBot extends EventEmitter {
    * Handle order filled event
    */
   private async handleOrderFilled(data: WSOrderData): Promise<void> {
+    // Prevent concurrent fill processing to avoid race conditions
+    if (this.isProcessingFill) {
+      log.warn('⚠️ Fill already being processed, skipping duplicate event');
+      return;
+    }
+
+    this.isProcessingFill = true;
+
     try {
       const side = data.side;
       const qty = new Decimal(data.fillQty);
       const price = new Decimal(data.avgFillPrice || data.price);
+      const orderId = data.clientOrderId || data.orderId.toString();
 
       log.warn(`⚠️⚠️⚠️ ORDER FILLED ⚠️⚠️⚠️`);
       log.warn(`  Side: ${side.toUpperCase()}`);
@@ -581,12 +629,40 @@ export class MakerPointsBot extends EventEmitter {
       // Update position back to zero
       this.state.position = Decimal(0);
 
+      // Clear the filled order from state to prevent trying to replace it later
+      // Also clear the opposite side since all orders should have been canceled before closing
+      if (side === 'buy') {
+        if (this.state.buyOrder && this.state.buyOrder.orderId === orderId) {
+          log.warn(`Clearing filled buy order from state: ${orderId}`);
+          this.state.buyOrder = null;
+        }
+      } else {
+        if (this.state.sellOrder && this.state.sellOrder.orderId === orderId) {
+          log.warn(`Clearing filled sell order from state: ${orderId}`);
+          this.state.sellOrder = null;
+        }
+      }
+
       // Wait 10 seconds before replacing order to let market stabilize
       // This helps avoid repeat fills during rapid price movements
       log.warn(`⏳ Waiting 10 seconds for market to stabilize before replacing order...`);
       await new Promise(resolve => setTimeout(resolve, 10000));
 
-      // Replace the filled order
+      // Check if bot is still running and hasn't been stopped during the wait
+      if (!this.state.isRunning || this.stopRequested) {
+        log.warn('Bot stopped during fill processing, skipping order replacement');
+        return;
+      }
+
+      // Verify position is still zero before placing new orders
+      const currentPosition = await this.orderManager.getCurrentPosition();
+      if (currentPosition.abs().gte(new Decimal('0.00001'))) {
+        log.error(`⚠️⚠️⚠️ NON-ZERO POSITION after fill processing: ${currentPosition} BTC`);
+        await this.closeDetectedPosition(currentPosition);
+        return;
+      }
+
+      // Replace the filled order with fresh mark price from REST API
       // IMPORTANT: Use fresh mark price from REST API to avoid placing orders at stale prices
       log.warn(`🔄 Replacing ${side.toUpperCase()} order with fresh mark price...`);
       await this.replaceOrder(side === 'buy' ? 'buy' : 'sell', true);
@@ -596,6 +672,9 @@ export class MakerPointsBot extends EventEmitter {
     } catch (error: any) {
       log.error(`Error handling order filled: ${error.message}`);
       console.error(error.stack);
+    } finally {
+      // Always clear the flag, even if an error occurred
+      this.isProcessingFill = false;
     }
   }
 
