@@ -25,11 +25,10 @@ start_bot() {
     local env_path="$(pwd)/$env_file"
     local log_name="$(basename $env_file .env)"
 
-    # Use tsx interpreter with ENV_FILE
-    # Using node with tsx loader (works better with PM2)
-    ENV_FILE="$env_path" pm2 start src/index.ts --name "$app_name" \
-      --interpreter node \
-      --node-args="--import tsx/esm" \
+    pm2 start ./src/index.ts \
+      --name "$app_name" \
+      --interpreter "npx tsx" \
+      --env ENV_FILE="$env_path" \
       --error "./logs/${log_name}-error.log" \
       --output "./logs/${log_name}-out.log" \
       --log "./logs/${log_name}-combined.log" \
