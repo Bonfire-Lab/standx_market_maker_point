@@ -282,6 +282,23 @@ export class StandXClient {
   }
 
   /**
+   * Fetch current mark price from REST API
+   * This is a public endpoint that doesn't require authentication
+   * Use this to get fresh mark price when you need guaranteed current data
+   */
+  async getMarkPrice(symbol: string): Promise<Decimal> {
+    try {
+      const response = await this.client.get(`${this.baseUrl}/api/query_symbol_price`, {
+        params: { symbol }
+      });
+
+      return new Decimal(response.data.mark_price || 0);
+    } catch (error: any) {
+      throw new Error(`Failed to fetch mark price: ${error.message}`);
+    }
+  }
+
+  /**
    * Fetch BBO prices
    */
   async fetchBBOPrices(symbol: string): Promise<[Decimal, Decimal]> {

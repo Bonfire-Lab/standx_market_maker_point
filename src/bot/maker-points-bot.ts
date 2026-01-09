@@ -310,7 +310,7 @@ export class MakerPointsBot extends EventEmitter {
       this.state.position = Decimal(0);
 
       // Wait a moment before placing new orders
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
       // Replace orders
       log.warn(`🔄 Replacing orders...`);
@@ -457,8 +457,10 @@ export class MakerPointsBot extends EventEmitter {
 
   /**
    * Replace an order
+   * @param side Order side to replace
+   * @param useFreshPrice If true, fetch fresh mark price via REST API before replacing
    */
-  private async replaceOrder(side: OrderSide): Promise<void> {
+  private async replaceOrder(side: OrderSide, useFreshPrice: boolean = false): Promise<void> {
     try {
       const order = side === 'buy' ? this.state.buyOrder : this.state.sellOrder;
 
@@ -466,7 +468,23 @@ export class MakerPointsBot extends EventEmitter {
         return;
       }
 
-      log.info(`[${side.toUpperCase()}] Current order: ${order.price.toFixed(2)} (Mark: ${this.markPrice.toFixed(2)})`);
+      // If useFreshPrice is true, fetch current mark price via REST API
+      // This is important after fills to ensure we use the latest price
+      let priceForCalc = this.markPrice;
+      if (useFreshPrice) {
+        try {
+          const freshPrice = await this.client.getMarkPrice(this.config.trading.symbol);
+          log.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)} (cached: $${this.markPrice.toFixed(2)})`);
+          priceForCalc = freshPrice;
+          // Update cached mark price
+          this.markPrice = freshPrice;
+          this.state.markPrice = freshPrice;
+        } catch (error: any) {
+          log.warn(`[${side.toUpperCase()}] Failed to fetch fresh mark price, using cached: ${error.message}`);
+        }
+      }
+
+      log.info(`[${side.toUpperCase()}] Current order: ${order.price.toFixed(2)} (Mark: ${priceForCalc.toFixed(2)})`);
 
       // Cancel existing order
       log.info(`[${side.toUpperCase()}] Canceling order ${order.orderId}...`);
@@ -482,7 +500,7 @@ export class MakerPointsBot extends EventEmitter {
       // Calculate new price
       const newPrice = this.orderManager.calculateOrderPrice(
         side,
-        this.markPrice,
+        priceForCalc,
         this.config.trading.orderDistanceBp
       );
 
@@ -564,8 +582,9 @@ export class MakerPointsBot extends EventEmitter {
       this.state.position = Decimal(0);
 
       // Replace the filled order
-      log.warn(`🔄 Replacing ${side.toUpperCase()} order...`);
-      await this.replaceOrder(side === 'buy' ? 'buy' : 'sell');
+      // IMPORTANT: Use fresh mark price from REST API to avoid placing orders at stale prices
+      log.warn(`🔄 Replacing ${side.toUpperCase()} order with fresh mark price...`);
+      await this.replaceOrder(side === 'buy' ? 'buy' : 'sell', true);
 
       this.emit('trade_executed', { side, qty, price: price.toString() });
 
