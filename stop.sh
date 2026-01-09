@@ -1,20 +1,16 @@
 #!/bin/bash
 
 # StandX Maker Bot - Stop Script
-# This script stops the bot running under PM2
+# This script stops all bot instances running under PM2
 
 set -e
 
-echo "🛑 Stopping StandX Maker Bot..."
+echo "🛑 Stopping StandX Maker Bots..."
+echo ""
 
-# Check if bot is running
-if pm2 describe standx-maker-bot > /dev/null 2>&1; then
-    # Stop the bot
-    pm2 stop standx-maker-bot
+# Stop all standx-maker-bot instances
+pm2 stop standx-maker-bot standx-maker-bot-2 standx-maker-bot-3 2>/dev/null || true
 
-    echo "✅ Bot stopped successfully!"
-    echo ""
-    echo "To start it again, run: ./start.sh"
-else
-    echo "⚠️  Bot is not currently running"
-fi
+echo "✅ All bots stopped!"
+echo ""
+echo "To start them again, run: ./start.sh"

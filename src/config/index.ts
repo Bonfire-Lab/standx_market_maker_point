@@ -1,9 +1,16 @@
 import convict from 'convict';
 import dotenv from 'dotenv';
 import { Config, TradingMode } from '../types';
+import path from 'path';
+
+// Determine which .env file to load
+// Can be specified via ENV_FILE environment variable
+const envFile = process.env.ENV_FILE || path.join(process.cwd(), '.env');
 
 // Load .env file
-dotenv.config();
+dotenv.config({ path: envFile });
+
+console.log(`[Config] Loading env from: ${envFile}`);
 
 // Define configuration schema
 const config = convict({
