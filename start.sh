@@ -25,15 +25,12 @@ start_bot() {
     local env_path="$(pwd)/$env_file"
     local log_name="$(basename $env_file .env)"
 
-    pm2 start ./src/index.ts \
-      --name "$app_name" \
-      --interpreter "npx tsx" \
-      --env ENV_FILE="$env_path" \
+    # Use tsx interpreter with ENV_FILE
+    ENV_FILE="$env_path" pm2 start tsx --name "$app_name" -- src/index.ts \
       -e "./logs/${log_name}-error.log" \
       -o "./logs/${log_name}-out.log" \
       -l "./logs/${log_name}-combined.log" \
-      --time \
-      --restart-delay 4000
+      --time
 
     echo "✅ Started: $app_name"
     echo ""
