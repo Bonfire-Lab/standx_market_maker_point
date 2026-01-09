@@ -26,10 +26,10 @@ start_bot() {
     local log_name="$(basename $env_file .env)"
 
     # Use tsx interpreter with ENV_FILE
-    ENV_FILE="$env_path" pm2 start tsx --name "$app_name" -- src/index.ts \
-      -e "./logs/${log_name}-error.log" \
-      -o "./logs/${log_name}-out.log" \
-      -l "./logs/${log_name}-combined.log" \
+    ENV_FILE="$env_path" pm2 start src/index.ts --name "$app_name" --interpreter ./node_modules/.bin/tsx \
+      --error "./logs/${log_name}-error.log" \
+      --output "./logs/${log_name}-out.log" \
+      --log "./logs/${log_name}-combined.log" \
       --time
 
     echo "✅ Started: $app_name"
