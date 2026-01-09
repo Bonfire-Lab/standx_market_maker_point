@@ -581,6 +581,11 @@ export class MakerPointsBot extends EventEmitter {
       // Update position back to zero
       this.state.position = Decimal(0);
 
+      // Wait 10 seconds before replacing order to let market stabilize
+      // This helps avoid repeat fills during rapid price movements
+      log.warn(`⏳ Waiting 10 seconds for market to stabilize before replacing order...`);
+      await new Promise(resolve => setTimeout(resolve, 10000));
+
       // Replace the filled order
       // IMPORTANT: Use fresh mark price from REST API to avoid placing orders at stale prices
       log.warn(`🔄 Replacing ${side.toUpperCase()} order with fresh mark price...`);
