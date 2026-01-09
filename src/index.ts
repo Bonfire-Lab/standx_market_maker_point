@@ -77,13 +77,15 @@ async function main() {
     setInterval(() => {
       const state = bot.getState();
       const uptime = bot.getUptime();
+      const buyOrderActive = state.buyOrder && state.buyOrder.status === 'OPEN';
+      const sellOrderActive = state.sellOrder && state.sellOrder.status === 'OPEN';
       console.log('');
       console.log('═'.repeat(50));
       console.log(`📊 Status Update (${uptime})`);
       console.log(`  Mark Price: $${state.markPrice.toFixed(2)}`);
       console.log(`  Position: ${state.position.toFixed(4)} BTC`);
-      console.log(`  Buy Order: ${state.buyOrder ? `Yes @ $${state.buyOrder.price.toFixed(2)}` : 'No'}`);
-      console.log(`  Sell Order: ${state.sellOrder ? `Yes @ $${state.sellOrder.price.toFixed(2)}` : 'No'}`);
+      console.log(`  Buy Order: ${buyOrderActive ? `Yes @ $${state.buyOrder!.price.toFixed(2)}` : 'No'}`);
+      console.log(`  Sell Order: ${sellOrderActive ? `Yes @ $${state.sellOrder!.price.toFixed(2)}` : 'No'}`);
       console.log(`  Placed: ${state.stats.ordersPlaced} | Canceled: ${state.stats.ordersCanceled} | Filled: ${state.stats.ordersFilled}`);
       console.log('═'.repeat(50));
       console.log('');
