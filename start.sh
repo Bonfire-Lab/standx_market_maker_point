@@ -33,10 +33,6 @@ start_bot() {
       -o "./logs/${log_name}-out.log" \
       -l "./logs/${log_name}-combined.log" \
       --time \
-      --merge-logs \
-      --autorestart \
-      --max-restarts 10 \
-      --min-uptime 10000 \
       --restart-delay 4000
 
     echo "✅ Started: $app_name"
