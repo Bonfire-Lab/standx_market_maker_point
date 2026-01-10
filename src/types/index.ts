@@ -33,6 +33,9 @@ export interface WSMarkPriceData {
   symbol: string;
   markPrice: string;
   indexPrice?: string;
+  lastPrice?: string;
+  midPrice?: string;
+  spread?: [string, string];  // [bid, ask]
   timestamp: number;
 }
 

@@ -171,7 +171,10 @@ export class StandXWebSocket extends EventEmitter {
       symbol: data.symbol,
       markPrice: data.mark_price || data.markPrice,
       indexPrice: data.index_price || data.indexPrice,
-      timestamp: data.timestamp || Date.now()
+      lastPrice: data.last_price || data.lastPrice,
+      midPrice: data.mid_price || data.midPrice,
+      spread: data.spread || undefined,  // [bid, ask] array from WS
+      timestamp: data.timestamp || data.time || Date.now()
     };
 
     this.emit('mark_price', markPriceData);

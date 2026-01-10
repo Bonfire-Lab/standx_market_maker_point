@@ -23,9 +23,13 @@ export class MakerPointsBot extends EventEmitter {
   // Bot state
   private state: BotState;
   private markPrice: Decimal = Decimal(0);
+  private lastPrice: Decimal | null = null;   // Latest trade price from WS
+  private spreadBid: Decimal | null = null;   // Best bid from WS
+  private spreadAsk: Decimal | null = null;   // Best ask from WS
   private stopRequested: boolean = false;
   private startTime: number;
   private isProcessingFill: boolean = false;  // Flag to prevent race conditions during fill processing
+  private isPausedDueToVolatility: boolean = false;  // Paused due to high last-mark gap
 
   constructor() {
     super();
@@ -207,7 +211,20 @@ export class MakerPointsBot extends EventEmitter {
       this.markPrice = markPrice;
       this.state.markPrice = markPrice;
 
+      // Update last price and spread from WS data
+      if (data.lastPrice) {
+        this.lastPrice = new Decimal(data.lastPrice);
+      }
+      if (data.spread && Array.isArray(data.spread) && data.spread.length >= 2) {
+        this.spreadBid = new Decimal(data.spread[0]);
+        this.spreadAsk = new Decimal(data.spread[1]);
+      }
+
       log.debug(`Mark price updated: $${markPrice.toFixed(2)}`);
+      if (this.lastPrice) {
+        const gapBp = this.lastPrice.sub(markPrice).abs().div(markPrice).mul(10000);
+        log.debug(`Last-mark gap: ${gapBp.toFixed(2)} bp (mark: ${markPrice.toFixed(2)}, last: ${this.lastPrice.toFixed(2)})`);
+      }
 
       // Check if we need to cancel and replace orders
       await this.checkAndReplaceOrders();
@@ -416,7 +433,70 @@ export class MakerPointsBot extends EventEmitter {
 
       const minDistanceBp = this.config.trading.minDistanceBp;
       const maxDistanceBp = this.config.trading.maxDistanceBp;
+      const orderDistanceBp = this.config.trading.orderDistanceBp;
 
+      // === NEW CHECK 1: Last-Mark Gap Detection ===
+      // If last price is too far from mark, market is volatile - pause ordering
+      if (this.lastPrice) {
+        const lastMarkGapBp = this.lastPrice.sub(this.markPrice).abs().div(this.markPrice).mul(10000);
+
+        if (lastMarkGapBp.gt(orderDistanceBp)) {
+          if (!this.isPausedDueToVolatility) {
+            // First time detecting high volatility
+            log.warn(`⚠️ HIGH VOLATILITY DETECTED: last-mark gap = ${lastMarkGapBp.toFixed(2)} bp > ${orderDistanceBp} bp`);
+            log.warn(`  Mark: $${this.markPrice.toFixed(2)}, Last: $${this.lastPrice.toFixed(2)}`);
+            log.warn(`  Canceling all orders and pausing until market stabilizes...`);
+
+            this.isPausedDueToVolatility = true;
+            await this.orderManager.cancelAllOrders();
+            this.state.buyOrder = null;
+            this.state.sellOrder = null;
+
+            telegram.warning(`⚠️ High volatility detected (last-mark gap: ${lastMarkGapBp.toFixed(2)} bp). Pausing orders.`);
+          }
+          // Skip all order checks while paused
+          return;
+        } else {
+          // Volatility has subsided
+          if (this.isPausedDueToVolatility && lastMarkGapBp.lt(new Decimal(orderDistanceBp).mul(0.8))) {
+            // Only resume when gap is below 80% of threshold (hysteresis)
+            log.info(`✅ Volatility normalized. Gap: ${lastMarkGapBp.toFixed(2)} bp. Resuming orders...`);
+            this.isPausedDueToVolatility = false;
+            telegram.info(`✅ Volatility normalized. Resuming orders.`);
+          } else if (this.isPausedDueToVolatility) {
+            // Still paused
+            log.debug(`Still paused due to volatility. Gap: ${lastMarkGapBp.toFixed(2)} bp`);
+            return;
+          }
+        }
+      }
+
+      // === NEW CHECK 2: Spread Validation ===
+      // Ensure orders are not inside the spread (would get filled immediately)
+      if (this.spreadBid && this.spreadAsk) {
+        // Check buy order
+        if (this.state.buyOrder && this.state.buyOrder.status === 'OPEN') {
+          const buyPrice = this.state.buyOrder.price;
+          if (buyPrice.gte(this.spreadBid)) {
+            log.warn(`[BUY] Order inside spread! Buy: ${buyPrice.toFixed(2)} >= Bid: ${this.spreadBid.toFixed(2)}`);
+            log.warn(`  Canceling and replacing...`);
+            await this.replaceOrder('buy');
+            return;  // Exit after replace, will recheck on next update
+          }
+        }
+        // Check sell order
+        if (this.state.sellOrder && this.state.sellOrder.status === 'OPEN') {
+          const sellPrice = this.state.sellOrder.price;
+          if (sellPrice.lte(this.spreadAsk)) {
+            log.warn(`[SELL] Order inside spread! Sell: ${sellPrice.toFixed(2)} <= Ask: ${this.spreadAsk.toFixed(2)}`);
+            log.warn(`  Canceling and replacing...`);
+            await this.replaceOrder('sell');
+            return;  // Exit after replace, will recheck on next update
+          }
+        }
+      }
+
+      // === EXISTING CHECK: Mark Price Distance ===
       // Check buy order
       if (this.state.buyOrder && this.state.buyOrder.status === 'OPEN') {
         const distance = this.markPrice
