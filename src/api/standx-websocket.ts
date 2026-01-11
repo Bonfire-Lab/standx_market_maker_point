@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import EventEmitter from 'eventemitter3';
 import { StandXAuth } from './standx-auth';
 import { WSMarkPriceData, WSOrderData, WSPositionData } from '../types';
+import { wsLog } from '../utils/ws-logger';
 
 /**
  * StandX WebSocket Client
@@ -48,29 +49,28 @@ export class StandXWebSocket extends EventEmitter {
         this.marketWS = new WebSocket(this.marketUrl, { handshakeTimeout: 30000 });
 
         this.marketWS.on('open', () => {
-          console.log('[WS] Market Stream connected');
+          wsLog.info('Market Stream connected');
           this.reconnectAttempts = 0;
-
-          // Don't authenticate here - will be done via subscribeUserStreams()
           resolve();
         });
 
         this.marketWS.on('message', (data: WebSocket.Data) => {
           try {
             const message = JSON.parse(data.toString());
-            console.log('[WS] Market message received:', JSON.stringify(message).substring(0, 200));
+            // Only log in debug mode - this fires ~3 times per second
+            wsLog.debug('Market message:', message.channel);
             this.handleMarketMessage(message);
           } catch (error) {
-            console.error('[WS] Failed to parse market message:', error);
+            wsLog.error('Failed to parse market message');
           }
         });
 
         this.marketWS.on('error', (error) => {
-          console.error('[WS] Market Stream error:', error);
+          wsLog.error('Market Stream error:', error);
         });
 
         this.marketWS.on('close', () => {
-          console.log('[WS] Market Stream closed');
+          wsLog.warn('Market Stream closed');
           if (!this.isManualClose) {
             this.scheduleReconnect('market');
           }
@@ -96,7 +96,7 @@ export class StandXWebSocket extends EventEmitter {
         this.orderWS = new WebSocket(this.orderUrl, { handshakeTimeout: 30000 });
 
         this.orderWS.on('open', () => {
-          console.log('[WS] Order Stream connected');
+          wsLog.info('Order Stream connected');
           resolve();
         });
 
@@ -105,16 +105,16 @@ export class StandXWebSocket extends EventEmitter {
             const message = JSON.parse(data.toString());
             this.handleOrderMessage(message);
           } catch (error) {
-            console.error('[WS] Failed to parse order message:', error);
+            wsLog.error('Failed to parse order message');
           }
         });
 
         this.orderWS.on('error', (error) => {
-          console.error('[WS] Order Stream error:', error);
+          wsLog.error('Order Stream error:', error);
         });
 
         this.orderWS.on('close', () => {
-          console.log('[WS] Order Stream closed');
+          wsLog.warn('Order Stream closed');
           if (!this.isManualClose) {
             this.scheduleReconnect('order');
           }
@@ -140,15 +140,14 @@ export class StandXWebSocket extends EventEmitter {
 
     switch (channel) {
       case 'order':
-        console.log('[WS] Order message received:', JSON.stringify(message).substring(0, 200));
+        wsLog.debug('Order message received');
         this.handleUserOrders(message.data);
         break;
       case 'position':
         this.handleUserPosition(message.data);
         break;
       default:
-        // Ignore other channels
-        console.log('[WS] Unknown channel:', channel);
+        // Silently ignore unknown channels - don't log
         break;
     }
   }
@@ -173,7 +172,7 @@ export class StandXWebSocket extends EventEmitter {
       indexPrice: data.index_price || data.indexPrice,
       lastPrice: data.last_price || data.lastPrice,
       midPrice: data.mid_price || data.midPrice,
-      spread: data.spread || undefined,  // [bid, ask] array from WS
+      spread: data.spread || undefined,
       timestamp: data.timestamp || data.time || Date.now()
     };
 
@@ -184,8 +183,6 @@ export class StandXWebSocket extends EventEmitter {
    * Handle user order updates
    */
   private handleUserOrders(data: any): void {
-    console.log('[WS] Processing order update:', JSON.stringify(data));
-
     const orderData: WSOrderData = {
       orderId: data.id || data.order_id,
       clientOrderId: data.cl_ord_id || data.clientOrderId,
@@ -198,11 +195,10 @@ export class StandXWebSocket extends EventEmitter {
       avgFillPrice: data.avg_fill_price || data.avgFillPrice
     };
 
-    console.log('[WS] Emitting order_update event:', {
-      orderId: orderData.clientOrderId,
-      status: orderData.status,
-      fillQty: orderData.fillQty
-    });
+    // Only log important state changes, not every update
+    if (orderData.status === 'FILLED' || orderData.status === 'CANCELED') {
+      wsLog.info(`Order ${orderData.clientOrderId}: ${orderData.status}`);
+    }
 
     this.emit('order_update', orderData);
   }
@@ -227,7 +223,6 @@ export class StandXWebSocket extends EventEmitter {
   subscribeMarkPrice(symbols: string[]): void {
     const symbol = symbols[0];
 
-    // Correct format from StandX docs
     this.marketWS?.send(JSON.stringify({
       subscribe: {
         channel: 'price',
@@ -235,7 +230,7 @@ export class StandXWebSocket extends EventEmitter {
       }
     }));
 
-    console.log(`[WS] Subscribed to price channel for ${symbol}`);
+    wsLog.info(`Subscribed to price channel for ${symbol}`);
   }
 
   /**
@@ -243,8 +238,7 @@ export class StandXWebSocket extends EventEmitter {
    */
   subscribeUserOrders(): void {
     // NOTE: This is handled by subscribeUserStreams()
-    // Kept for backward compatibility
-    console.log(`[WS] subscribeUserOrders() called - will subscribe via subscribeUserStreams()`);
+    wsLog.debug('subscribeUserOrders called - using subscribeUserStreams');
   }
 
   /**
@@ -252,13 +246,11 @@ export class StandXWebSocket extends EventEmitter {
    */
   subscribeUserPosition(): void {
     // NOTE: This is handled by subscribeUserStreams()
-    // Kept for backward compatibility
-    console.log(`[WS] subscribeUserPosition() called - will subscribe via subscribeUserStreams()`);
+    wsLog.debug('subscribeUserPosition called - using subscribeUserStreams');
   }
 
   /**
    * Subscribe to both order and position channels
-   * This should be called instead of subscribing separately
    */
   subscribeUserStreams(): void {
     this.marketWS?.send(JSON.stringify({
@@ -270,7 +262,7 @@ export class StandXWebSocket extends EventEmitter {
         ]
       }
     }));
-    console.log(`[WS] Subscribed to order and position streams via re-auth`);
+    wsLog.info('Subscribed to order and position streams');
   }
 
   /**
@@ -278,7 +270,7 @@ export class StandXWebSocket extends EventEmitter {
    */
   private scheduleReconnect(stream: 'market' | 'order'): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error(`[WS] Max reconnect attempts reached for ${stream} stream`);
+      wsLog.error(`Max reconnect attempts reached for ${stream} stream`);
       this.emit('max_reconnect_reached');
       return;
     }
@@ -286,7 +278,7 @@ export class StandXWebSocket extends EventEmitter {
     const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
 
-    console.log(`[WS] Reconnecting ${stream} stream in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    wsLog.warn(`Reconnecting ${stream} in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.emit('reconnecting', { stream, attempt: this.reconnectAttempts, delay });
 
     setTimeout(async () => {
@@ -295,14 +287,13 @@ export class StandXWebSocket extends EventEmitter {
       try {
         if (stream === 'market') {
           await this.connectMarketStream();
-          // Resubscribe to channels
           this.emit('market_reconnected');
         } else {
           await this.connectOrderStream();
           this.emit('order_reconnected');
         }
       } catch (error) {
-        console.error(`[WS] Failed to reconnect ${stream} stream:`, error);
+        wsLog.error(`Failed to reconnect ${stream} stream`);
         this.scheduleReconnect(stream);
       }
     }, delay);
@@ -324,7 +315,7 @@ export class StandXWebSocket extends EventEmitter {
       this.orderWS = null;
     }
 
-    console.log('[WS] Disconnected from all streams');
+    wsLog.info('Disconnected from all streams');
   }
 
   /**
