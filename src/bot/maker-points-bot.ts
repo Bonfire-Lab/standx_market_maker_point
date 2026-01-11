@@ -462,6 +462,44 @@ export class MakerPointsBot extends EventEmitter {
             // Only resume when gap is below 80% of threshold (hysteresis)
             log.info(`✅ Volatility normalized. Gap: ${lastMarkGapBp.toFixed(2)} bp. Resuming orders...`);
             this.isPausedDueToVolatility = false;
+
+            // Place orders to resume trading
+            const mode = this.config.trading.mode;
+            if (mode === 'both' || mode === 'buy') {
+              const buyPrice = this.orderManager.calculateOrderPrice(
+                'buy',
+                this.markPrice,
+                this.config.trading.orderDistanceBp
+              );
+              const buyOrder = await this.orderManager.placeOrder(
+                'buy',
+                new Decimal(this.config.trading.orderSizeBtc),
+                buyPrice
+              );
+              if (buyOrder) {
+                this.state.buyOrder = buyOrder;
+                this.state.stats.ordersPlaced++;
+                log.info(`[BUY] Order placed after resuming: ${buyOrder.orderId} @ $${buyOrder.price.toFixed(2)}`);
+              }
+            }
+            if (mode === 'both' || mode === 'sell') {
+              const sellPrice = this.orderManager.calculateOrderPrice(
+                'sell',
+                this.markPrice,
+                this.config.trading.orderDistanceBp
+              );
+              const sellOrder = await this.orderManager.placeOrder(
+                'sell',
+                new Decimal(this.config.trading.orderSizeBtc),
+                sellPrice
+              );
+              if (sellOrder) {
+                this.state.sellOrder = sellOrder;
+                this.state.stats.ordersPlaced++;
+                log.info(`[SELL] Order placed after resuming: ${sellOrder.orderId} @ $${sellOrder.price.toFixed(2)}`);
+              }
+            }
+
             telegram.info(`✅ Volatility normalized. Resuming orders.`);
           } else if (this.isPausedDueToVolatility) {
             // Still paused
