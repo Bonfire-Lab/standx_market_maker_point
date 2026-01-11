@@ -1,8 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
+// Generate log file name from env file (e.g., '.env' -> 'main', '.env.account2' -> 'account2')
+function getLogFilePrefix(envFile) {
+  if (envFile === '.env') return 'main';
+  return envFile.replace('.env.', '').replace('.env', '');
+}
+
 // Base configuration for a single bot instance
 function createBotConfig(envFile, appName) {
+  const prefix = getLogFilePrefix(envFile);
   return {
     name: appName,
     script: './src/index.ts',
@@ -17,9 +24,9 @@ function createBotConfig(envFile, appName) {
       TZ: 'Asia/Shanghai',
       ENV_FILE: path.join(__dirname, envFile)
     },
-    error_file: `./logs/${envFile.replace('.env', '')}-error.log`,
-    out_file: `./logs/${envFile.replace('.env', '')}-out.log`,
-    log_file: `./logs/${envFile.replace('.env', '')}-combined.log`,
+    error_file: `./logs/${prefix}-error.log`,
+    out_file: `./logs/${prefix}-out.log`,
+    log_file: `./logs/${prefix}-combined.log`,
     time: true,
     log_date_format: 'YYYY-MM-DD HH:mm:ss UTC+8',
     merge_logs: true,
