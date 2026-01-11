@@ -341,7 +341,9 @@ export class StandXClient {
    * Build request headers with auth and signature
    */
   private buildHeaders(payload: string, timestamp: number): Record<string, string> {
-    const signatureHeaders = this.auth.signRequest(payload, timestamp);
+    // New API: signRequest requires requestId parameter
+    const requestId = this.auth.getRequestId();
+    const signatureHeaders = this.auth.signRequest(payload, requestId, timestamp);
 
     return {
       'Content-Type': 'application/json',

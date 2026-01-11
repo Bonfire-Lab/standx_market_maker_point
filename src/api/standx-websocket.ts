@@ -27,9 +27,9 @@ export class StandXWebSocket extends EventEmitter {
 
   /**
    * Connect to both WebSocket streams
+   * Note: auth.loginWithPrivateKey() must be called before this method
    */
   async connect(): Promise<void> {
-    await this.auth.login();
     this.isManualClose = false;
 
     // Connect Market Stream

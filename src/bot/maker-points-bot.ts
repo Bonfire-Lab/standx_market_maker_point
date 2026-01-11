@@ -34,12 +34,8 @@ export class MakerPointsBot extends EventEmitter {
   constructor() {
     super();
 
-    // Initialize auth
-    this.auth = new StandXAuth(
-      this.config.standx.privateKey,
-      this.config.standx.address,
-      this.config.standx.chain
-    );
+    // Initialize auth (new API: no constructor params, login via loginWithPrivateKey)
+    this.auth = new StandXAuth();
 
     // Initialize clients
     this.client = new StandXClient(this.auth);
@@ -70,6 +66,14 @@ export class MakerPointsBot extends EventEmitter {
     try {
       log.info('🚀 Starting StandX Maker Points Bot...');
       this.stopRequested = false;
+
+      // Authenticate first (new API: loginWithPrivateKey)
+      log.info('Authenticating...');
+      await this.auth.loginWithPrivateKey(
+        this.config.standx.privateKey,
+        this.config.standx.chain as 'bsc' | 'solana'
+      );
+      log.info('✅ Authenticated');
 
       // Initialize client
       log.info(`Initializing for ${this.config.trading.symbol}...`);
