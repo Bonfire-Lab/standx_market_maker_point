@@ -25,8 +25,8 @@ export class StandXAuth {
     this.chain = chain;
     this.apiUrl = 'https://api.standx.com';
 
-    // Generate ephemeral Ed25519 key pair
-    this.ed25519PrivateKey = ed25519.utils.randomPrivateKey();
+    // Use randomSecretKey as per StandX docs (alias of randomPrivateKey)
+    this.ed25519PrivateKey = ed25519.utils.randomSecretKey();
     this.ed25519PublicKey = ed25519.getPublicKey(this.ed25519PrivateKey);
 
     // Encode public key as Base58 for request ID
@@ -81,7 +81,11 @@ export class StandXAuth {
 
       return this.accessToken;
     } catch (error: any) {
-      throw new Error(`Login failed: ${error.message}`);
+      const errorMsg = `Login failed: ${error.message}`;
+      if (error.response?.data) {
+        throw new Error(`${errorMsg}\nAPI Response: ${JSON.stringify(error.response.data)}`);
+      }
+      throw new Error(errorMsg);
     }
   }
 
