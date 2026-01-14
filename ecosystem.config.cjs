@@ -1,13 +1,40 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const os = require('os');
 
-// Try to find Bun executable
+// Try to find Bun executable - multiple methods
 let bunPath = null;
-try {
-  bunPath = execSync('which bun', { encoding: 'utf8' }).trim();
-} catch (e) {
-  // Bun not found
+
+// Method 1: Check environment variable
+if (process.env.BUN_PATH) {
+  bunPath = process.env.BUN_PATH;
+}
+
+// Method 2: Try 'which bun'
+if (!bunPath) {
+  try {
+    bunPath = execSync('which bun', { encoding: 'utf8' }).trim();
+  } catch (e) {
+    // Continue to next method
+  }
+}
+
+// Method 3: Common installation paths
+if (!bunPath) {
+  const homeDir = os.homedir();
+  const commonPaths = [
+    path.join(homeDir, '.bun', 'bin', 'bun'),
+    path.join(homeDir, '.local', 'bin', 'bun'),
+    '/usr/local/bin/bun',
+    '/usr/bin/bun'
+  ];
+  for (const p of commonPaths) {
+    if (fs.existsSync(p)) {
+      bunPath = p;
+      break;
+    }
+  }
 }
 
 // Detect if Bun should be used
