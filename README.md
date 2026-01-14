@@ -8,9 +8,11 @@
 - ✅ WebSocket实时价格监控
 - ✅ **双阈值智能订单管理**（自动保持在积分范围内）
 - ✅ 订单成交立即市价平仓
+- ✅ **支持多账户同时运行**
 - ✅ 支持双侧/单侧挂单模式
 - ✅ Telegram实时通知
 - ✅ 自动重连和错误恢复
+- ✅ **基于Bun运行时（更低内存、更快启动）**
 
 ## 核心策略
 
@@ -42,39 +44,28 @@ Sell Order:  $93,691
 BP = 111 / 93691 × 10000 = 11.85 bp
 ```
 
-### 实时监控机制
-
-每次WebSocket收到新的mark price时，bot会：
-
-1. **计算当前距离**：`|markPrice - orderPrice| / orderPrice × 10000`
-2. **检查阈值**：
-   - 如果 `distance < minDistanceBp` → 太危险，可能成交 → 取消并重挂
-   - 如果 `distance > maxDistanceBp` → 太远了，吃不到积分 → 取消并重挂
-   - 如果 `minDistanceBp ≤ distance ≤ maxDistanceBp` → ✅ 理想范围，保持订单
-3. **动态调整**：新订单使用当前mark price重新计算价格
-
-### 价格变化响应
-
-当mark price变化时，bot会**自动**响应：
-
-**场景1：Mark价格上涨（接近订单）**
-```
-初始: Mark $93,580, Order $93,691 → 距离 11.85 bp ✅
-涨到: Mark $93,680, Order $93,691 → 距离 1.17 bp ⚠️
-→ 触发: "Too close to mark price" → 自动取消并重挂
-```
-
-**场景2：Mark价格下跌（远离订单）**
-```
-初始: Mark $93,580, Order $93,691 → 距离 11.85 bp ✅
-跌到: Mark $93,500, Order $93,691 → 距离 20.38 bp ⚠️
-→ 触发: "Too far from mark price" → 自动取消并重挂
-```
-
 ## 安装
+
+### 方式1: 使用 Bun（推荐）
+
+```bash
+# 安装 Bun
+curl -fsSL https://bun.sh/install | bash
+
+# 安装依赖
+bun install
+```
+
+**Bun 的优势：**
+- 更低的内存占用（约20-30%）
+- 更快的启动速度
+- 原生支持TypeScript和WebSocket
+
+### 方式2: 使用 Node.js
 
 ```bash
 npm install
+npm run build
 ```
 
 ## 配置
@@ -89,12 +80,34 @@ cp .env.example .env
 
 ### 2. 配置参数说明
 
-#### StandX钱包配置
+#### 账户配置
 
+支持三种配置方式：
+
+**方式1: 单账户（向后兼容）**
 ```bash
-STANDX_WALLET_PRIVATE_KEY=your_private_key    # 钱包私钥
-STANDX_WALLET_ADDRESS=your_wallet_address    # 钱包地址
-STANDX_CHAIN=bsc                             # 链（bsc或eth）
+STANDX_WALLET_PRIVATE_KEY=your_private_key
+STANDX_WALLET_ADDRESS=your_wallet_address
+STANDX_CHAIN=bsc
+ACCOUNT_NAME=Account-1
+```
+
+**方式2: 多账户（编号）**
+```bash
+ACCOUNT_1_NAME=Account1
+ACCOUNT_1_PRIVATE_KEY=your_private_key_1
+ACCOUNT_1_ADDRESS=your_wallet_address_1
+ACCOUNT_1_CHAIN=bsc
+
+ACCOUNT_2_NAME=Account2
+ACCOUNT_2_PRIVATE_KEY=your_private_key_2
+ACCOUNT_2_ADDRESS=your_wallet_address_2
+ACCOUNT_2_CHAIN=bsc
+```
+
+**方式3: 多账户（JSON格式）**
+```bash
+ACCOUNTS=[{"name":"Account1","privateKey":"key1","address":"0x...","chain":"bsc"},{"name":"Account2","privateKey":"key2","address":"0x...","chain":"bsc"}]
 ```
 
 #### 交易参数
@@ -147,28 +160,37 @@ LOG_TO_CONSOLE=true                           # 是否输出到控制台
 
 ## 运行
 
-### 开发模式
+### 使用 Bun（推荐）
 
 ```bash
-npm run dev
+# 开发模式（热重载）
+bun run dev
+
+# 生产模式
+bun run start
 ```
 
-### 生产模式
+### 使用 Node.js
 
 ```bash
+# 开发模式
+npm run dev
+
+# 生产模式
 npm run build
 npm start
 ```
 
-## 实用脚本
+### Ubuntu 服务器安装 Bun
 
-### 取消所有订单
+如果遇到 `unzip is required` 错误：
 
 ```bash
-npx tsx scripts/cancel-all-orders.ts
+sudo apt-get update && sudo apt-get install -y unzip
+curl -fsSL https://bun.sh/install | bash
 ```
 
-## 运行示例
+## 多账户运行示例
 
 ```
 ╔════════════════════════════════════════╗
@@ -177,26 +199,53 @@ npx tsx scripts/cancel-all-orders.ts
 
 Configuration:
   Symbol: BTC-USD
-  Mode: sell
+  Mode: both
   Order Size: 0.0001 BTC
   Target Distance: 10 bp
   Valid Range: 5-15 bp
 
-🚀 Starting StandX Maker Points Bot...
-✅ Initialized for BTC-USD
-✅ WebSocket connected
-✅ Initial mark price: $93597.92
-✅ sell order placed: bot-7d5f8c4d3ce543dc @ $93691.5
+Accounts: 2
+  - Account1: 0x1234...5678
+  - Account2: 0xabcd...efgh
 
-Bot is running. Press Ctrl+C to stop.
+[Account1] Starting bot 1/2...
+[Account1] ✅ Bot started
+[Account2] Starting bot 2/2...
+[Account2] ✅ Bot started
 
-══════════════════════════════════════════════════
-📊 Status Update (0h 5m)
+✅ All bots started successfully!
+
+============================================================
+📊 Status Update - 14:30:00
+============================================================
+Account1:
+  Uptime: 2h 15m
   Mark Price: $93580.36
   Position: 0.0000 BTC
-  Sell Order: Yes @ $93691.50 (distance: 11.86 bp)
-  Placed: 3 | Canceled: 2 | Filled: 0
-══════════════════════════════════════════════════
+  Buy Order: Yes @ $93486.73
+  Sell Order: Yes @ $93674.03
+  Placed: 152 | Canceled: 128 | Filled: 0
+
+Account2:
+  Uptime: 2h 14m
+  Mark Price: $93580.36
+  Position: 0.0000 BTC
+  Buy Order: Yes @ $93486.73
+  Sell Order: Yes @ $93674.03
+  Placed: 148 | Canceled: 125 | Filled: 0
+============================================================
+```
+
+## 实用脚本
+
+### 取消所有订单
+
+```bash
+# Bun
+bun run cancel-all.ts
+
+# Node.js
+npx tsx scripts/cancel-all-orders.ts
 ```
 
 ## 日志说明
@@ -204,21 +253,21 @@ Bot is running. Press Ctrl+C to stop.
 ### 订单替换日志
 
 ```
-[SELL] Too close to mark price (4.50 bp < 5 bp), canceling and replacing...
-[SELL] Too far from mark price (16.20 bp > 15 bp), canceling and replacing...
-[SELL] Order in valid range: 11.86 bp [5-15 bp]
+[Account1] [SELL] Too close to mark price (4.50 bp < 5 bp), canceling and replacing...
+[Account1] [SELL] Too far from mark price (16.20 bp > 15 bp), canceling and replacing...
+[Account1] [SELL] Order in valid range: 11.86 bp [5-15 bp]
 ```
 
 ### 成交日志
 
 ```
-⚠️⚠️⚠️ ORDER FILLED ⚠️⚠️⚠️
+[Account1] ⚠️⚠️⚠️ ORDER FILLED ⚠️⚠️⚠️
   Side: SELL
   Qty: 0.0001 BTC
   Price: $93691.50
-🔄 Closing position immediately...
-✅ Position closed successfully
-🔄 Replacing SELL order...
+[Account1] 🔄 Closing position immediately...
+[Account1] ✅ Position closed successfully
+[Account1] 🔄 Replacing SELL order...
 ```
 
 ## 风险提示
@@ -241,25 +290,37 @@ Bot is running. Press Ctrl+C to stop.
 
 ```
 ┌─────────────────────────────────────────┐
-│         StandX WebSocket               │
-│  - Market Stream (价格更新)             │
-│  - Order Stream (订单状态)              │
-│  - Position Stream (持仓更新)           │
+│         BotManager (多账户管理)           │
+│  - 管理多个Bot实例                       │
+│  - 统一生命周期控制                       │
 └──────────────┬──────────────────────────┘
                │
-┌──────────────▼──────────────────────────┐
-│        MakerPointsBot                   │
-│  - 实时监控mark price                   │
-│  - 双阈值订单管理                        │
-│  - 自动成交处理                          │
-└──────────────┬──────────────────────────┘
+       ┌───────┴───────┐
+       ▼               ▼
+┌──────────────┐  ┌──────────────┐
+│  Bot: Acc1   │  │  Bot: Acc2   │
+└──────┬───────┘  └──────┬───────┘
+       │                  │
+┌──────▼──────────────────▼──────────┐
+│         StandX WebSocket            │
+│  - Market Stream (价格更新)         │
+│  - Order Stream (订单状态)           │
+│  - Position Stream (持仓更新)        │
+└──────────────┬───────────────────────┘
                │
-┌──────────────▼──────────────────────────┐
-│         StandXClient (REST API)         │
-│  - 下单                                 │
-│  - 取消订单                              │
-│  - 查询订单                              │
-└─────────────────────────────────────────┘
+┌──────────────▼───────────────────────┐
+│        MakerPointsBot                │
+│  - 实时监控mark price                │
+│  - 双阈值订单管理                     │
+│  - 自动成交处理                       │
+└──────────────┬───────────────────────┘
+               │
+┌──────────────▼───────────────────────┐
+│         StandXClient (REST API)      │
+│  - 下单                              │
+│  - 取消订单                           │
+│  - 查询订单                           │
+└───────────────────────────────────────┘
 ```
 
 ## 故障排除
