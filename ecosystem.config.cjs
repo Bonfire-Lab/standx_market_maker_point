@@ -1,67 +1,49 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
-const os = require('os');
 
-// Try to find Bun executable - multiple methods
-let bunPath = null;
+// Try to find Bun in common paths
+function findBunPath() {
+  const { execSync } = require('child_process');
+  const os = require('os');
 
-// Method 1: Check environment variable
-if (process.env.BUN_PATH) {
-  bunPath = process.env.BUN_PATH;
-}
-
-// Method 2: Try 'which bun'
-if (!bunPath) {
-  try {
-    bunPath = execSync('which bun', { encoding: 'utf8' }).trim();
-  } catch (e) {
-    // Continue to next method
-  }
-}
-
-// Method 3: Common installation paths
-if (!bunPath) {
   const homeDir = os.homedir();
-  const commonPaths = [
-    path.join(homeDir, '.bun', 'bin', 'bun'),
-    path.join(homeDir, '.local', 'bin', 'bun'),
-    '/usr/local/bin/bun',
-    '/usr/bin/bun'
+  const paths = [
+    // Try 'which bun' first
+    () => {
+      try { return execSync('which bun', { encoding: 'utf8' }).trim(); } catch { return null; }
+    },
+    // Then common paths
+    () => {
+      const p = path.join(homeDir, '.bun', 'bin', 'bun');
+      return fs.existsSync(p) ? p : null;
+    },
+    () => {
+      const p = path.join(homeDir, '.local', 'bin', 'bun');
+      return fs.existsSync(p) ? p : null;
+    },
+    () => fs.existsSync('/usr/local/bin/bun') ? '/usr/local/bin/bun' : null,
+    () => fs.existsSync('/usr/bin/bun') ? '/usr/bin/bun' : null,
   ];
-  for (const p of commonPaths) {
-    if (fs.existsSync(p)) {
-      bunPath = p;
-      break;
-    }
+
+  for (const fn of paths) {
+    const result = fn();
+    if (result) return result;
   }
+  return null;
 }
 
-// Detect if Bun should be used
-let useBun = bunPath && (
-  process.env.USE_BUN === 'true' ||
-  fs.existsSync(path.join(__dirname, 'bun.lockb')) ||
-  fs.existsSync(path.join(__dirname, 'node_modules/.bun'))
-);
+const bunPath = findBunPath();
+const useBun = bunPath !== null;
 
-// Force Bun if available and no package-lock.json (Bun project)
-if (!useBun && bunPath && !fs.existsSync(path.join(__dirname, 'package-lock.json'))) {
-  // This is a Bun project (no package-lock.json), use Bun
-  useBun = true;
-}
-
-// Generate log file name from env file (e.g., '.env' -> 'main', '.env.account2' -> 'account2')
 function getLogFilePrefix(envFile) {
   if (envFile === '.env') return 'main';
   return envFile.replace('.env.', '').replace('.env', '');
 }
 
-// Base configuration for a single bot instance
 function createBotConfig(envFile, appName) {
   const prefix = getLogFilePrefix(envFile);
 
   if (useBun) {
-    // Bun configuration - faster startup, lower memory
     return {
       name: appName,
       script: path.join(__dirname, 'src/index.ts'),
@@ -88,7 +70,7 @@ function createBotConfig(envFile, appName) {
     };
   }
 
-  // Node.js configuration (fallback)
+  // Node.js fallback - requires built dist/index.js
   return {
     name: appName,
     script: path.join(__dirname, 'dist/index.js'),
@@ -114,22 +96,8 @@ function createBotConfig(envFile, appName) {
   };
 }
 
-// Start with primary bot
 const apps = [createBotConfig('.env', 'standx-maker-bot')];
 
-// Add additional bots if .env files exist (legacy multi-env format)
-const additionalEnvs = ['.env.account2', '.env.account3'];
-additionalEnvs.forEach((envFile, index) => {
-  if (fs.existsSync(path.join(__dirname, envFile))) {
-    apps.push(createBotConfig(envFile, `standx-maker-bot-${index + 2}`));
-  }
-});
-
 module.exports = {
-  apps,
-  // Display detected runtime
-  __meta: {
-    runtime: useBun ? `Bun (${bunPath})` : 'Node.js (fallback)',
-    note: 'Bun is automatically detected when bun.lockb exists and bun command is available'
-  }
+  apps
 };
