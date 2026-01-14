@@ -36,7 +36,7 @@ echo "Runtime: $RUNTIME"
 echo ""
 
 # Start all configured bots from ecosystem.config.js
-pm2 start ecosystem.config.js
+pm2 start ecosystem.config.cjs
 
 # Wait a moment for the bots to start
 sleep 2
