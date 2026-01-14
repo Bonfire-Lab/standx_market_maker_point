@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # StandX Maker Bot - Start Script
-# This script starts the bot using PM2 process manager
-# Automatically detects Bun or Node.js
+# This script starts the bot using PM2 process manager with Bun
 
 set -e
 
@@ -19,26 +18,38 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-# Detect runtime
-if [ -f "bun.lockb" ] || command -v bun &> /dev/null; then
-  RUNTIME="Bun"
-  if ! command -v bun &> /dev/null; then
-    echo "⚠️  bun.lockb found but Bun is not installed!"
-    echo "   Install Bun: curl -fsSL https://bun.sh/install | bash"
-    echo "   Falling back to Node.js..."
-    RUNTIME="Node.js (fallback)"
-  fi
+# Find Bun path
+if [ -n "$BUN_PATH" ]; then
+  BUN_BIN="$BUN_PATH"
+elif command -v bun &> /dev/null; then
+  BUN_BIN="$(command -v bun)"
 else
-  RUNTIME="Node.js"
+  # Try common installation paths
+  HOME_BUN="$HOME/.bun/bin/bun"
+  if [ -f "$HOME_BUN" ]; then
+    BUN_BIN="$HOME_BUN"
+  else
+    echo "❌ Error: Bun not found!"
+    echo "   Install Bun: curl -fsSL https://bun.sh/install | bash"
+    exit 1
+  fi
 fi
 
-echo "Runtime: $RUNTIME"
+echo "Runtime: Bun"
+echo "Bun path: $BUN_BIN"
 echo ""
 
-# Start all configured bots from ecosystem.config.js
-pm2 start ecosystem.config.cjs
+# Check if bot is already running, delete it first
+if pm2 list | grep -q "standx-maker-bot.*online"; then
+  echo "Stopping existing bot..."
+  pm2 delete standx-maker-bot 2>/dev/null || true
+  sleep 1
+fi
 
-# Wait a moment for the bots to start
+# Start with Bun directly
+pm2 start "$BUN_BIN" --name standx-maker-bot -- src/index.ts
+
+# Wait a moment for the bot to start
 sleep 2
 
 # Show status
@@ -54,8 +65,7 @@ echo "Useful commands:"
 echo "  View all logs:  pm2 logs"
 echo "  View specific:  pm2 logs standx-maker-bot"
 echo "  Monitor:        pm2 monit"
-echo "  Stop all:       ./stop.sh"
-echo "  Stop specific:  pm2 stop standx-maker-bot"
+echo "  Stop:           pm2 stop standx-maker-bot"
 echo "  Restart:        pm2 restart standx-maker-bot"
 echo "  Save config:    pm2 save"
 echo ""
