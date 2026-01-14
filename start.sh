@@ -2,7 +2,7 @@
 
 # StandX Maker Bot - Start Script
 # This script starts the bot using PM2 process manager
-# Supports multiple accounts via .env.account2, .env.account3
+# Automatically detects Bun or Node.js
 
 set -e
 
@@ -18,6 +18,22 @@ if [ ! -f ".env" ]; then
   echo "❌ Error: .env file not found!"
   exit 1
 fi
+
+# Detect runtime
+if [ -f "bun.lockb" ] || command -v bun &> /dev/null; then
+  RUNTIME="Bun"
+  if ! command -v bun &> /dev/null; then
+    echo "⚠️  bun.lockb found but Bun is not installed!"
+    echo "   Install Bun: curl -fsSL https://bun.sh/install | bash"
+    echo "   Falling back to Node.js..."
+    RUNTIME="Node.js (fallback)"
+  fi
+else
+  RUNTIME="Node.js"
+fi
+
+echo "Runtime: $RUNTIME"
+echo ""
 
 # Start all configured bots from ecosystem.config.js
 pm2 start ecosystem.config.js
@@ -39,5 +55,7 @@ echo "  View all logs:  pm2 logs"
 echo "  View specific:  pm2 logs standx-maker-bot"
 echo "  Monitor:        pm2 monit"
 echo "  Stop all:       ./stop.sh"
-echo "  Stop specific:  pm2 stop standx-maker-bot-2"
+echo "  Stop specific:  pm2 stop standx-maker-bot"
 echo "  Restart:        pm2 restart standx-maker-bot"
+echo "  Save config:    pm2 save"
+echo ""
