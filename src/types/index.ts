@@ -91,6 +91,13 @@ export type TradingMode = 'both' | 'buy' | 'sell';
 
 // ==================== 配置 ====================
 
+export interface AccountConfig {
+  name: string;
+  privateKey: string;
+  address: string;
+  chain: 'bsc' | 'solana';
+}
+
 export interface StandXConfig {
   privateKey: string;
   address: string;
@@ -119,6 +126,7 @@ export interface LoggingConfig {
 }
 
 export interface Config {
+  accounts: AccountConfig[];
   standx: StandXConfig;
   trading: TradingConfig;
   telegram: TelegramConfig;

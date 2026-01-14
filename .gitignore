@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+bun.lockb
+
+# Bun
+bunfig.toml
+.pnpm-store/
 
 # Build output
 dist/

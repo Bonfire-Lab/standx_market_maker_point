@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "commonjs",
-    "lib": ["ES2022"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["ESNext"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
@@ -10,11 +10,13 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "declaration": true,
-    "declarationMap": true,
+    "moduleResolution": "bundler",
+    "types": ["bun-types"],
+    "allowSyntheticDefaultImports": true,
+    "declaration": false,
+    "declarationMap": false,
     "sourceMap": true,
-    "types": ["node"]
+    "noEmit": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

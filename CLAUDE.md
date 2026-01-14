@@ -12,7 +12,7 @@ This is a **StandX Maker Points Farming Bot** that automatically places limit or
 - Dynamic order replacement when price moves within threshold
 - Instant position closure on fills
 - Telegram notifications
-- TUI dashboard for monitoring
+- Console-based status output
 - Zero position tolerance (risk management)
 
 ## Commands
@@ -41,11 +41,6 @@ Edit `.env` file with your credentials:
 - `TRADING_ORDER_SIZE_BTC`: Order size in BTC
 - `TRADING_ORDER_DISTANCE_BP`: Distance from mark price in basis points (default: 20bp = 0.2%)
 - `TRADING_CANCEL_THRESHOLD_BP`: Cancel threshold in basis points (default: 10bp = 0.1%)
-
-### TUI Controls
-- `q`: Quit the bot
-- `s`: Stop/start toggle
-- `c`: Cancel all orders
 
 ## Architecture
 
@@ -84,11 +79,6 @@ Edit `.env` file with your credentials:
 - Performs JWT login flow
 - Signs requests with Ed25519 private key
 
-**`src/ui/tui.ts`** - Terminal UI
-- Real-time dashboard using blessed
-- Displays: status, orders, statistics, trades, logs
-- Interactive controls (quit, stop/start, cancel)
-
 **`src/notify/telegram.ts`** - Telegram notifications
 - Sends alerts on: startup, shutdown, order fills, errors
 - Status updates every hour
@@ -109,7 +99,6 @@ Edit `.env` file with your credentials:
    → Bot.handleMarkPriceUpdate()
    → Check if orders need replacement (within threshold)
    → If yes: cancel old order, place new order
-   → Update TUI
    ```
 
    ```
@@ -189,8 +178,6 @@ if abs(mark_price - order_price) / order_price <= cancel_threshold_bp/10000:
 - `position`: Current position size
 - `buyOrder`, `sellOrder`: Active order info
 - `stats`: Orders placed/canceled/filled counts
-
-All state updates emit events for TUI to consume.
 
 ## Testing Strategy
 

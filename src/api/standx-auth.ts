@@ -1,7 +1,27 @@
 import { ed25519 } from '@noble/curves/ed25519';
 import { base58 } from '@scure/base';
 import { ethers } from 'ethers';
-import axios from 'axios';
+
+/**
+ * HTTP fetch helper using Bun's native fetch
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export type Chain = 'bsc' | 'solana';
 
@@ -86,15 +106,16 @@ export class StandXAuth {
    * Prepare sign-in - get signed data from server
    */
   private async prepareSignIn(chain: Chain, address: string): Promise<string> {
-    const res = await axios.post(
-      `${this.baseUrl}/v1/offchain/prepare-signin?chain=${chain}`,
-      { address, requestId: this.requestId },
-      {
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    const url = `${this.baseUrl}/v1/offchain/prepare-signin?chain=${chain}`;
 
-    const data = res.data;
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, requestId: this.requestId })
+    });
+
+    const data = await response.json();
+
     if (!data.success) {
       throw new Error(`Prepare signin failed: ${JSON.stringify(data)}`);
     }
@@ -110,23 +131,25 @@ export class StandXAuth {
     signedData: string,
     expiresSeconds: number = 604800 // default: 7 days
   ): Promise<LoginResponse> {
-    const res = await axios.post(
-      `${this.baseUrl}/v1/offchain/login?chain=${chain}`,
-      {
+    const url = `${this.baseUrl}/v1/offchain/login?chain=${chain}`;
+
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         signature,
         signedData,
         expiresSeconds,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+      })
+    });
 
-    if (!res.data.token) {
+    const result = await response.json();
+
+    if (!result.token) {
       throw new Error('No token in login response');
     }
 
-    return res.data;
+    return result;
   }
 
   /**

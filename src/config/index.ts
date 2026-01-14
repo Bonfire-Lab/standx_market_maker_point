@@ -1,6 +1,6 @@
 import convict from 'convict';
 import dotenv from 'dotenv';
-import { Config, TradingMode } from '../types';
+import { Config, TradingMode, AccountConfig } from '../types';
 import path from 'path';
 
 // Determine which .env file to load
@@ -12,27 +12,89 @@ dotenv.config({ path: envFile });
 
 console.log(`[Config] Loading env from: ${envFile}`);
 
+/**
+ * Parse accounts from environment variable
+ * Format: ACCOUNTS=[{"name":"Account1","privateKey":"...","address":"..."},{"name":"Account2",...}]
+ * Or use individual variables: ACCOUNT_1_NAME, ACCOUNT_1_PRIVATE_KEY, ACCOUNT_1_ADDRESS, etc.
+ */
+function parseAccounts(): AccountConfig[] {
+  // Try JSON format first
+  const accountsJson = process.env.ACCOUNTS;
+  if (accountsJson) {
+    try {
+      const accounts = JSON.parse(accountsJson);
+      if (Array.isArray(accounts) && accounts.length > 0) {
+        console.log(`[Config] Loaded ${accounts.length} accounts from ACCOUNTS JSON`);
+        return accounts.map((acc: any) => ({
+          name: acc.name || acc.id || `Account-${acc.address?.slice(0, 8)}`,
+          privateKey: acc.privateKey,
+          address: acc.address,
+          chain: acc.chain || 'bsc'
+        }));
+      }
+    } catch (e) {
+      console.warn('[Config] Failed to parse ACCOUNTS JSON, trying individual variables...');
+    }
+  }
+
+  // Try individual account variables (fallback and legacy single account)
+  const accounts: AccountConfig[] = [];
+
+  // Check for legacy single account format
+  const legacyKey = process.env.STANDX_WALLET_PRIVATE_KEY;
+  const legacyAddress = process.env.STANDX_WALLET_ADDRESS;
+  const legacyChain = process.env.STANDX_CHAIN || 'bsc';
+
+  if (legacyKey && legacyAddress) {
+    accounts.push({
+      name: process.env.ACCOUNT_NAME || 'Account-1',
+      privateKey: legacyKey,
+      address: legacyAddress,
+      chain: legacyChain as 'bsc' | 'solana'
+    });
+    console.log(`[Config] Loaded account from legacy format (STANDX_WALLET_*)`);
+  }
+
+  // Check for numbered accounts (ACCOUNT_1_*, ACCOUNT_2_*, etc.)
+  let i = 1;
+  while (true) {
+    const name = process.env[`ACCOUNT_${i}_NAME`] || `Account-${i}`;
+    const privateKey = process.env[`ACCOUNT_${i}_PRIVATE_KEY`];
+    const address = process.env[`ACCOUNT_${i}_ADDRESS`];
+    const chain = process.env[`ACCOUNT_${i}_CHAIN`] || 'bsc';
+
+    if (!privateKey || !address) {
+      break;
+    }
+
+    accounts.push({
+      name,
+      privateKey,
+      address,
+      chain: chain as 'bsc' | 'solana'
+    });
+
+    i++;
+  }
+
+  // If we found numbered accounts and they're different from legacy, use them
+  if (i > 1 && (accounts.length > 1 || !legacyKey)) {
+    console.log(`[Config] Loaded ${accounts.length} accounts from numbered variables (ACCOUNT_N_*)`);
+  }
+
+  if (accounts.length === 0) {
+    console.warn('[Config] No accounts configured!');
+  }
+
+  return accounts;
+}
+
 // Define configuration schema
 const config = convict({
-  standx: {
-    privateKey: {
-      doc: 'StandX wallet private key',
-      format: String,
-      default: '',
-      env: 'STANDX_WALLET_PRIVATE_KEY'
-    },
-    address: {
-      doc: 'StandX wallet address',
-      format: String,
-      default: '',
-      env: 'STANDX_WALLET_ADDRESS'
-    },
-    chain: {
-      doc: 'Blockchain network',
-      format: ['bsc', 'eth'],
-      default: 'bsc',
-      env: 'STANDX_CHAIN'
-    }
+  accounts: {
+    doc: 'Trading accounts',
+    format: Array,
+    default: [],
   },
   trading: {
     symbol: {
@@ -114,12 +176,20 @@ const config = convict({
   }
 });
 
+// Parse accounts from environment
+const parsedAccounts = parseAccounts();
+config.set('accounts', parsedAccounts);
+
 // Validate and load configuration
 config.validate({ allowed: 'strict' });
 
-// Export typed getter
+// Export typed getters
 export function getConfig(): Config {
   return config.get() as Config;
+}
+
+export function getAccounts(): AccountConfig[] {
+  return parsedAccounts;
 }
 
 export default config;

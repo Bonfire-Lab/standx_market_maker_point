@@ -5,9 +5,9 @@ import { StandXClient } from '../api/standx-client';
 import { StandXWebSocket } from '../api/standx-websocket';
 import { OrderManager } from './order-manager';
 import { telegram } from '../notify/telegram';
-import { log } from '../utils/logger';
+import { log, createAccountLogger } from '../utils/logger';
 import { getConfig } from '../config';
-import { BotState, BotStats, TradingMode, OrderSide, WSMarkPriceData, WSOrderData } from '../types';
+import { BotState, BotStats, TradingMode, OrderSide, WSMarkPriceData, WSOrderData, AccountConfig } from '../types';
 
 /**
  * StandX Maker Points Bot
@@ -19,6 +19,9 @@ export class MakerPointsBot extends EventEmitter {
   private ws: StandXWebSocket;
   private orderManager: OrderManager;
   private config = getConfig();
+  private account: AccountConfig;
+  private logger: ReturnType<typeof createAccountLogger>;
+  private accountId: string;
 
   // Bot state
   private state: BotState;
@@ -31,8 +34,12 @@ export class MakerPointsBot extends EventEmitter {
   private isProcessingFill: boolean = false;  // Flag to prevent race conditions during fill processing
   private isPausedDueToVolatility: boolean = false;  // Paused due to high last-mark gap
 
-  constructor() {
+  constructor(account: AccountConfig) {
     super();
+
+    this.account = account;
+    this.accountId = account.name;
+    this.logger = createAccountLogger(account);
 
     // Initialize auth (new API: no constructor params, login via loginWithPrivateKey)
     this.auth = new StandXAuth();
@@ -60,33 +67,47 @@ export class MakerPointsBot extends EventEmitter {
   }
 
   /**
+   * Get account ID
+   */
+  getAccountId(): string {
+    return this.accountId;
+  }
+
+  /**
+   * Get account config
+   */
+  getAccount(): AccountConfig {
+    return this.account;
+  }
+
+  /**
    * Start the bot
    */
   async start(): Promise<void> {
     try {
-      log.info('🚀 Starting StandX Maker Points Bot...');
+      this.logger.info('🚀 Starting StandX Maker Points Bot...');
       this.stopRequested = false;
 
       // Authenticate first (new API: loginWithPrivateKey)
-      log.info('Authenticating...');
+      this.logger.info('Authenticating...');
       await this.auth.loginWithPrivateKey(
-        this.config.standx.privateKey,
-        this.config.standx.chain as 'bsc' | 'solana'
+        this.account.privateKey,
+        this.account.chain
       );
-      log.info('✅ Authenticated');
+      this.logger.info('✅ Authenticated');
 
       // Initialize client
-      log.info(`Initializing for ${this.config.trading.symbol}...`);
+      this.logger.info(`Initializing for ${this.config.trading.symbol}...`);
       await this.client.initialize(this.config.trading.symbol);
-      log.info(`✅ Initialized for ${this.config.trading.symbol}`);
+      this.logger.info(`✅ Initialized for ${this.config.trading.symbol}`);
 
       // Connect WebSocket
-      log.info('Connecting to WebSocket...');
+      this.logger.info('Connecting to WebSocket...');
       await this.ws.connect();
-      log.info('✅ WebSocket connected');
+      this.logger.info('✅ WebSocket connected');
 
       // Subscribe to channels
-      log.info('Subscribing to channels...');
+      this.logger.info('Subscribing to channels...');
       this.ws.subscribeMarkPrice([this.config.trading.symbol]);
       this.ws.subscribeUserStreams();
 
@@ -94,11 +115,11 @@ export class MakerPointsBot extends EventEmitter {
       this.setupWebSocketHandlers();
 
       // Wait for initial mark price from WebSocket
-      log.info('Waiting for initial mark price from WebSocket...');
+      this.logger.info('Waiting for initial mark price from WebSocket...');
       await this.waitForMarkPrice();
 
       // Check and close any existing position
-      log.info('Checking existing positions...');
+      this.logger.info('Checking existing positions...');
       await this.ensureZeroPosition();
 
       // Set state to running
@@ -106,7 +127,7 @@ export class MakerPointsBot extends EventEmitter {
       this.emit('state_changed', this.state);
 
       // Place initial orders
-      log.info('Placing initial orders...');
+      this.logger.info('Placing initial orders...');
       await this.placeInitialOrders();
 
       // Send startup notification
@@ -114,11 +135,11 @@ export class MakerPointsBot extends EventEmitter {
         await telegram.startup();
       }
 
-      log.info('✅ Bot started successfully');
+      this.logger.info('✅ Bot started successfully');
       this.emit('started');
 
     } catch (error: any) {
-      log.error(`Failed to start bot: ${error.message}`);
+      this.logger.error(`Failed to start bot: ${error.message}`);
       console.error('Stack trace:', error.stack);
       await telegram.error(`Bot startup failed: ${error.message}`);
       throw error;
@@ -130,7 +151,7 @@ export class MakerPointsBot extends EventEmitter {
    */
   async stop(): Promise<void> {
     try {
-      log.info('🛑 Stopping bot...');
+      this.logger.info('🛑 Stopping bot...');
       this.stopRequested = true;
       this.state.isRunning = false;
 
@@ -145,11 +166,11 @@ export class MakerPointsBot extends EventEmitter {
         await telegram.shutdown();
       }
 
-      log.info('✅ Bot stopped');
+      this.logger.info('✅ Bot stopped');
       this.emit('stopped');
 
     } catch (error: any) {
-      log.error(`Error stopping bot: ${error.message}`);
+      this.logger.error(`Error stopping bot: ${error.message}`);
     }
   }
 
@@ -167,7 +188,7 @@ export class MakerPointsBot extends EventEmitter {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    log.info(`✅ Initial mark price: $${this.markPrice.toFixed(2)}`);
+    this.logger.info(`✅ Initial mark price: $${this.markPrice.toFixed(2)}`);
   }
 
   /**
@@ -191,12 +212,12 @@ export class MakerPointsBot extends EventEmitter {
 
     // Reconnection events
     this.ws.on('reconnecting', (info: any) => {
-      log.warn(`WebSocket reconnecting (attempt ${info.attempt})`);
+      this.logger.warn(`WebSocket reconnecting (attempt ${info.attempt})`);
       telegram.warning(`WebSocket reconnecting... (attempt ${info.attempt})`);
     });
 
     this.ws.on('market_reconnected', () => {
-      log.info('✅ Market WebSocket reconnected');
+      this.logger.info('✅ Market WebSocket reconnected');
       telegram.info('Market WebSocket reconnected');
       // Resubscribe
       this.ws.subscribeMarkPrice([this.config.trading.symbol]);
@@ -224,17 +245,17 @@ export class MakerPointsBot extends EventEmitter {
         this.spreadAsk = new Decimal(data.spread[1]);
       }
 
-      log.debug(`Mark price updated: $${markPrice.toFixed(2)}`);
+      this.logger.debug(`Mark price updated: $${markPrice.toFixed(2)}`);
       if (this.lastPrice) {
         const gapBp = this.lastPrice.sub(markPrice).abs().div(markPrice).mul(10000);
-        log.debug(`Last-mark gap: ${gapBp.toFixed(2)} bp (mark: ${markPrice.toFixed(2)}, last: ${this.lastPrice.toFixed(2)})`);
+        this.logger.debug(`Last-mark gap: ${gapBp.toFixed(2)} bp (mark: ${markPrice.toFixed(2)}, last: ${this.lastPrice.toFixed(2)})`);
       }
 
       // Check if we need to cancel and replace orders
       await this.checkAndReplaceOrders();
 
     } catch (error: any) {
-      log.error(`Error handling mark price update: ${error.message}`);
+      this.logger.error(`Error handling mark price update: ${error.message}`);
     }
   }
 
@@ -246,7 +267,7 @@ export class MakerPointsBot extends EventEmitter {
       const orderId = data.clientOrderId || data.orderId.toString();
       const status = data.status;
 
-      log.debug(`Order update: ${orderId} - ${status}`);
+      this.logger.debug(`Order update: ${orderId} - ${status}`);
 
       // Update our order tracking
       if (this.state.buyOrder && this.state.buyOrder.orderId === orderId) {
@@ -267,7 +288,7 @@ export class MakerPointsBot extends EventEmitter {
       this.emit('order_updated', this.state);
 
     } catch (error: any) {
-      log.error(`Error handling order update: ${error.message}`);
+      this.logger.error(`Error handling order update: ${error.message}`);
     }
   }
 
@@ -280,13 +301,13 @@ export class MakerPointsBot extends EventEmitter {
       const previousPosition = this.state.position;
       this.state.position = position;
 
-      log.debug(`Position updated: ${previousPosition} → ${position} BTC`);
+      this.logger.debug(`Position updated: ${previousPosition} → ${position} BTC`);
 
       // Check if position changed from zero (an order was filled)
       if (previousPosition.abs().lt(new Decimal('0.00001')) && position.abs().gte(new Decimal('0.00001'))) {
-        log.warn(`⚠️⚠️⚠️ POSITION DETECTED VIA WEBSOCKET ⚠️⚠️⚠️`);
-        log.warn(`  Previous: ${previousPosition} BTC`);
-        log.warn(`  Current: ${position} BTC`);
+        this.logger.warn(`⚠️⚠️⚠️ POSITION DETECTED VIA WEBSOCKET ⚠️⚠️⚠️`);
+        this.logger.warn(`  Previous: ${previousPosition} BTC`);
+        this.logger.warn(`  Current: ${position} BTC`);
 
         // Close position immediately
         await this.closeDetectedPosition(position);
@@ -296,7 +317,7 @@ export class MakerPointsBot extends EventEmitter {
       this.emit('position_updated', position);
 
     } catch (error: any) {
-      log.error(`Error handling position update: ${error.message}`);
+      this.logger.error(`Error handling position update: ${error.message}`);
     }
   }
 
@@ -308,9 +329,9 @@ export class MakerPointsBot extends EventEmitter {
       const positionSize = position.abs();
       const closeSide = position.gt(0) ? 'sell' : 'buy';
 
-      log.warn(`🔄 Closing position via market order...`);
-      log.warn(`  Size: ${positionSize} BTC`);
-      log.warn(`  Side: ${closeSide}`);
+      this.logger.warn(`🔄 Closing position via market order...`);
+      this.logger.warn(`  Size: ${positionSize} BTC`);
+      this.logger.warn(`  Side: ${closeSide}`);
 
       // Cancel all pending orders first
       await this.orderManager.cancelAllOrders();
@@ -319,14 +340,14 @@ export class MakerPointsBot extends EventEmitter {
       const closed = await this.orderManager.closePosition(positionSize, closeSide);
 
       if (!closed) {
-        log.error('❌ Failed to close position!');
+        this.logger.error('❌ Failed to close position!');
         await telegram.error('Failed to close position! Manual intervention required!');
         // Stop the bot to prevent further damage
         await this.stop();
         return;
       }
 
-      log.warn(`✅ Position closed successfully`);
+      this.logger.warn(`✅ Position closed successfully`);
 
       // Update position back to zero
       this.state.position = Decimal(0);
@@ -335,7 +356,7 @@ export class MakerPointsBot extends EventEmitter {
       await new Promise(resolve => setTimeout(resolve, 5000));
 
       // Replace orders
-      log.warn(`🔄 Replacing orders...`);
+      this.logger.warn(`🔄 Replacing orders...`);
       await this.placeInitialOrders();
 
       // Send notification
@@ -344,7 +365,7 @@ export class MakerPointsBot extends EventEmitter {
       }
 
     } catch (error: any) {
-      log.error(`Error closing detected position: ${error.message}`);
+      this.logger.error(`Error closing detected position: ${error.message}`);
       await telegram.error(`Error closing position: ${error.message}`);
       await this.stop();
     }
@@ -400,10 +421,10 @@ export class MakerPointsBot extends EventEmitter {
       }
 
       this.emit('orders_placed', this.state);
-      log.info('✅ Initial orders placed');
+      this.logger.info('✅ Initial orders placed');
 
     } catch (error: any) {
-      log.error(`Error placing initial orders: ${error.message}`);
+      this.logger.error(`Error placing initial orders: ${error.message}`);
     }
   }
 
@@ -421,7 +442,7 @@ export class MakerPointsBot extends EventEmitter {
 
     // Skip if we're currently processing a fill to prevent race conditions
     if (this.isProcessingFill) {
-      log.debug('Skipping checkAndReplaceOrders - fill processing in progress');
+      this.logger.debug('Skipping checkAndReplaceOrders - fill processing in progress');
       return;
     }
 
@@ -429,8 +450,8 @@ export class MakerPointsBot extends EventEmitter {
       // SAFETY CHECK: Verify position is zero
       const currentPosition = await this.orderManager.getCurrentPosition();
       if (currentPosition.abs().gte(new Decimal('0.00001'))) {
-        log.error(`⚠️⚠️⚠️ NON-ZERO POSITION DETECTED IN CHECK LOOP ⚠️⚠️⚠️`);
-        log.error(`  Position: ${currentPosition} BTC`);
+        this.logger.error(`⚠️⚠️⚠️ NON-ZERO POSITION DETECTED IN CHECK LOOP ⚠️⚠️⚠️`);
+        this.logger.error(`  Position: ${currentPosition} BTC`);
         await this.closeDetectedPosition(currentPosition);
         return;
       }
@@ -447,9 +468,9 @@ export class MakerPointsBot extends EventEmitter {
         if (lastMarkGapBp.gt(orderDistanceBp)) {
           if (!this.isPausedDueToVolatility) {
             // First time detecting high volatility
-            log.warn(`⚠️ HIGH VOLATILITY DETECTED: last-mark gap = ${lastMarkGapBp.toFixed(2)} bp > ${orderDistanceBp} bp`);
-            log.warn(`  Mark: $${this.markPrice.toFixed(2)}, Last: $${this.lastPrice.toFixed(2)}`);
-            log.warn(`  Canceling all orders and pausing until market stabilizes...`);
+            this.logger.warn(`⚠️ HIGH VOLATILITY DETECTED: last-mark gap = ${lastMarkGapBp.toFixed(2)} bp > ${orderDistanceBp} bp`);
+            this.logger.warn(`  Mark: $${this.markPrice.toFixed(2)}, Last: $${this.lastPrice.toFixed(2)}`);
+            this.logger.warn(`  Canceling all orders and pausing until market stabilizes...`);
 
             this.isPausedDueToVolatility = true;
             await this.orderManager.cancelAllOrders();
@@ -464,7 +485,7 @@ export class MakerPointsBot extends EventEmitter {
           // Volatility has subsided
           if (this.isPausedDueToVolatility && lastMarkGapBp.lt(new Decimal(orderDistanceBp).mul(0.8))) {
             // Only resume when gap is below 80% of threshold (hysteresis)
-            log.info(`✅ Volatility normalized. Gap: ${lastMarkGapBp.toFixed(2)} bp. Resuming orders...`);
+            this.logger.info(`✅ Volatility normalized. Gap: ${lastMarkGapBp.toFixed(2)} bp. Resuming orders...`);
             this.isPausedDueToVolatility = false;
 
             // Place orders to resume trading
@@ -483,7 +504,7 @@ export class MakerPointsBot extends EventEmitter {
               if (buyOrder) {
                 this.state.buyOrder = buyOrder;
                 this.state.stats.ordersPlaced++;
-                log.info(`[BUY] Order placed after resuming: ${buyOrder.orderId} @ $${buyOrder.price.toFixed(2)}`);
+                this.logger.info(`[BUY] Order placed after resuming: ${buyOrder.orderId} @ $${buyOrder.price.toFixed(2)}`);
               }
             }
             if (mode === 'both' || mode === 'sell') {
@@ -500,14 +521,14 @@ export class MakerPointsBot extends EventEmitter {
               if (sellOrder) {
                 this.state.sellOrder = sellOrder;
                 this.state.stats.ordersPlaced++;
-                log.info(`[SELL] Order placed after resuming: ${sellOrder.orderId} @ $${sellOrder.price.toFixed(2)}`);
+                this.logger.info(`[SELL] Order placed after resuming: ${sellOrder.orderId} @ $${sellOrder.price.toFixed(2)}`);
               }
             }
 
             telegram.info(`✅ Volatility normalized. Resuming orders.`);
           } else if (this.isPausedDueToVolatility) {
             // Still paused
-            log.debug(`Still paused due to volatility. Gap: ${lastMarkGapBp.toFixed(2)} bp`);
+            this.logger.debug(`Still paused due to volatility. Gap: ${lastMarkGapBp.toFixed(2)} bp`);
             return;
           }
         }
@@ -520,8 +541,8 @@ export class MakerPointsBot extends EventEmitter {
         if (this.state.buyOrder && this.state.buyOrder.status === 'OPEN') {
           const buyPrice = this.state.buyOrder.price;
           if (buyPrice.gte(this.spreadBid)) {
-            log.warn(`[BUY] Order inside spread! Buy: ${buyPrice.toFixed(2)} >= Bid: ${this.spreadBid.toFixed(2)}`);
-            log.warn(`  Canceling and replacing...`);
+            this.logger.warn(`[BUY] Order inside spread! Buy: ${buyPrice.toFixed(2)} >= Bid: ${this.spreadBid.toFixed(2)}`);
+            this.logger.warn(`  Canceling and replacing...`);
             await this.replaceOrder('buy');
             return;  // Exit after replace, will recheck on next update
           }
@@ -530,8 +551,8 @@ export class MakerPointsBot extends EventEmitter {
         if (this.state.sellOrder && this.state.sellOrder.status === 'OPEN') {
           const sellPrice = this.state.sellOrder.price;
           if (sellPrice.lte(this.spreadAsk)) {
-            log.warn(`[SELL] Order inside spread! Sell: ${sellPrice.toFixed(2)} <= Ask: ${this.spreadAsk.toFixed(2)}`);
-            log.warn(`  Canceling and replacing...`);
+            this.logger.warn(`[SELL] Order inside spread! Sell: ${sellPrice.toFixed(2)} <= Ask: ${this.spreadAsk.toFixed(2)}`);
+            this.logger.warn(`  Canceling and replacing...`);
             await this.replaceOrder('sell');
             return;  // Exit after replace, will recheck on next update
           }
@@ -549,13 +570,13 @@ export class MakerPointsBot extends EventEmitter {
 
         // Replace if too close (risk of fill) or too far (no points)
         if (distance.lt(new Decimal(minDistanceBp))) {
-          log.info(`[BUY] Too close to mark price (${distance.toFixed(2)} bp < ${minDistanceBp} bp), canceling and replacing...`);
+          this.logger.info(`[BUY] Too close to mark price (${distance.toFixed(2)} bp < ${minDistanceBp} bp), canceling and replacing...`);
           await this.replaceOrder('buy');
         } else if (distance.gt(new Decimal(maxDistanceBp))) {
-          log.info(`[BUY] Too far from mark price (${distance.toFixed(2)} bp > ${maxDistanceBp} bp), canceling and replacing...`);
+          this.logger.info(`[BUY] Too far from mark price (${distance.toFixed(2)} bp > ${maxDistanceBp} bp), canceling and replacing...`);
           await this.replaceOrder('buy');
         } else {
-          log.debug(`[BUY] Order in valid range: ${distance.toFixed(2)} bp [${minDistanceBp}-${maxDistanceBp} bp]`);
+          this.logger.debug(`[BUY] Order in valid range: ${distance.toFixed(2)} bp [${minDistanceBp}-${maxDistanceBp} bp]`);
         }
       }
 
@@ -569,18 +590,18 @@ export class MakerPointsBot extends EventEmitter {
 
         // Replace if too close (risk of fill) or too far (no points)
         if (distance.lt(new Decimal(minDistanceBp))) {
-          log.info(`[SELL] Too close to mark price (${distance.toFixed(2)} bp < ${minDistanceBp} bp), canceling and replacing...`);
+          this.logger.info(`[SELL] Too close to mark price (${distance.toFixed(2)} bp < ${minDistanceBp} bp), canceling and replacing...`);
           await this.replaceOrder('sell');
         } else if (distance.gt(new Decimal(maxDistanceBp))) {
-          log.info(`[SELL] Too far from mark price (${distance.toFixed(2)} bp > ${maxDistanceBp} bp), canceling and replacing...`);
+          this.logger.info(`[SELL] Too far from mark price (${distance.toFixed(2)} bp > ${maxDistanceBp} bp), canceling and replacing...`);
           await this.replaceOrder('sell');
         } else {
-          log.debug(`[SELL] Order in valid range: ${distance.toFixed(2)} bp [${minDistanceBp}-${maxDistanceBp} bp]`);
+          this.logger.debug(`[SELL] Order in valid range: ${distance.toFixed(2)} bp [${minDistanceBp}-${maxDistanceBp} bp]`);
         }
       }
 
     } catch (error: any) {
-      log.error(`Error in check and replace: ${error.message}`);
+      this.logger.error(`Error in check and replace: ${error.message}`);
     }
   }
 
@@ -596,11 +617,11 @@ export class MakerPointsBot extends EventEmitter {
       if (!order) {
         // This can happen when the order was cleared during fill processing
         // Just place a new order instead of replacing
-        log.info(`[${side.toUpperCase()}] No existing order to replace, placing new order...`);
+        this.logger.info(`[${side.toUpperCase()}] No existing order to replace, placing new order...`);
 
         if (useFreshPrice) {
           const freshPrice = await this.client.getMarkPrice(this.config.trading.symbol);
-          log.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)}`);
+          this.logger.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)}`);
           this.markPrice = freshPrice;
           this.state.markPrice = freshPrice;
         }
@@ -624,7 +645,7 @@ export class MakerPointsBot extends EventEmitter {
             this.state.sellOrder = newOrder;
           }
           this.state.stats.ordersPlaced++;
-          log.info(`[${side.toUpperCase()}] New order placed: ${newOrder.orderId} @ $${newOrder.price.toFixed(2)}`);
+          this.logger.info(`[${side.toUpperCase()}] New order placed: ${newOrder.orderId} @ $${newOrder.price.toFixed(2)}`);
         }
         return;
       }
@@ -635,27 +656,27 @@ export class MakerPointsBot extends EventEmitter {
       if (useFreshPrice) {
         try {
           const freshPrice = await this.client.getMarkPrice(this.config.trading.symbol);
-          log.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)} (cached: $${this.markPrice.toFixed(2)})`);
+          this.logger.info(`[${side.toUpperCase()}] Fresh mark price: $${freshPrice.toFixed(2)} (cached: $${this.markPrice.toFixed(2)})`);
           priceForCalc = freshPrice;
           // Update cached mark price
           this.markPrice = freshPrice;
           this.state.markPrice = freshPrice;
         } catch (error: any) {
-          log.warn(`[${side.toUpperCase()}] Failed to fetch fresh mark price, using cached: ${error.message}`);
+          this.logger.warn(`[${side.toUpperCase()}] Failed to fetch fresh mark price, using cached: ${error.message}`);
         }
       }
 
-      log.info(`[${side.toUpperCase()}] Current order: ${order.price.toFixed(2)} (Mark: ${priceForCalc.toFixed(2)})`);
+      this.logger.info(`[${side.toUpperCase()}] Current order: ${order.price.toFixed(2)} (Mark: ${priceForCalc.toFixed(2)})`);
 
       // Cancel existing order
-      log.info(`[${side.toUpperCase()}] Canceling order ${order.orderId}...`);
+      this.logger.info(`[${side.toUpperCase()}] Canceling order ${order.orderId}...`);
       const canceled = await this.orderManager.cancelOrder(order.orderId);
 
       if (canceled) {
         this.state.stats.ordersCanceled++;
-        log.info(`[${side.toUpperCase()}] Order canceled successfully`);
+        this.logger.info(`[${side.toUpperCase()}] Order canceled successfully`);
       } else {
-        log.warn(`[${side.toUpperCase()}] Order cancel failed (may already be filled)`);
+        this.logger.warn(`[${side.toUpperCase()}] Order cancel failed (may already be filled)`);
       }
 
       // Calculate new price
@@ -665,7 +686,7 @@ export class MakerPointsBot extends EventEmitter {
         this.config.trading.orderDistanceBp
       );
 
-      log.info(`[${side.toUpperCase()}] New price: $${newPrice.toFixed(2)}`);
+      this.logger.info(`[${side.toUpperCase()}] New price: $${newPrice.toFixed(2)}`);
 
       // Place new order
       const newOrder = await this.orderManager.placeOrder(
@@ -681,14 +702,14 @@ export class MakerPointsBot extends EventEmitter {
           this.state.sellOrder = newOrder;
         }
         this.state.stats.ordersPlaced++;
-        log.info(`[${side.toUpperCase()}] New order placed: ${newOrder.orderId} @ $${newOrder.price.toFixed(2)}`);
+        this.logger.info(`[${side.toUpperCase()}] New order placed: ${newOrder.orderId} @ $${newOrder.price.toFixed(2)}`);
       }
 
       this.emit('order_replaced', { side, newOrder });
-      log.info(`✅ [${side.toUpperCase()}] Order replaced successfully`);
+      this.logger.info(`✅ [${side.toUpperCase()}] Order replaced successfully`);
 
     } catch (error: any) {
-      log.error(`Error replacing ${side} order: ${error.message}`);
+      this.logger.error(`Error replacing ${side} order: ${error.message}`);
     }
   }
 
@@ -698,7 +719,7 @@ export class MakerPointsBot extends EventEmitter {
   private async handleOrderFilled(data: WSOrderData): Promise<void> {
     // Prevent concurrent fill processing to avoid race conditions
     if (this.isProcessingFill) {
-      log.warn('⚠️ Fill already being processed, skipping duplicate event');
+      this.logger.warn('⚠️ Fill already being processed, skipping duplicate event');
       return;
     }
 
@@ -710,11 +731,11 @@ export class MakerPointsBot extends EventEmitter {
       const price = new Decimal(data.avgFillPrice || data.price);
       const orderId = data.clientOrderId || data.orderId.toString();
 
-      log.warn(`⚠️⚠️⚠️ ORDER FILLED ⚠️⚠️⚠️`);
-      log.warn(`  Side: ${side.toUpperCase()}`);
-      log.warn(`  Qty: ${qty} BTC`);
-      log.warn(`  Price: $${price.toFixed(2)}`);
-      log.warn(`  Order ID: ${data.orderId}`);
+      this.logger.warn(`⚠️⚠️⚠️ ORDER FILLED ⚠️⚠️⚠️`);
+      this.logger.warn(`  Side: ${side.toUpperCase()}`);
+      this.logger.warn(`  Qty: ${qty} BTC`);
+      this.logger.warn(`  Price: $${price.toFixed(2)}`);
+      this.logger.warn(`  Order ID: ${data.orderId}`);
 
       this.state.stats.ordersFilled++;
       this.state.stats.lastTradeTime = Date.now();
@@ -726,7 +747,7 @@ export class MakerPointsBot extends EventEmitter {
         this.state.position = this.state.position.minus(qty);
       }
 
-      log.warn(`Current Position: ${this.state.position.toFixed(4)} BTC`);
+      this.logger.warn(`Current Position: ${this.state.position.toFixed(4)} BTC`);
 
       // Send Telegram notification
       if (telegram.isEnabled()) {
@@ -734,19 +755,19 @@ export class MakerPointsBot extends EventEmitter {
       }
 
       // Close position immediately
-      log.warn(`🔄 Closing position immediately...`);
+      this.logger.warn(`🔄 Closing position immediately...`);
       const closeSide = side === 'buy' ? 'sell' : 'buy';
       const closed = await this.orderManager.closePosition(qty, closeSide);
 
       if (!closed) {
-        log.error('❌ Failed to close position!');
+        this.logger.error('❌ Failed to close position!');
         await telegram.error('Failed to close position!');
         // Stop the bot to prevent further damage
         await this.stop();
         return;
       }
 
-      log.warn(`✅ Position closed successfully`);
+      this.logger.warn(`✅ Position closed successfully`);
 
       // Update position back to zero
       this.state.position = Decimal(0);
@@ -755,44 +776,44 @@ export class MakerPointsBot extends EventEmitter {
       // Also clear the opposite side since all orders should have been canceled before closing
       if (side === 'buy') {
         if (this.state.buyOrder && this.state.buyOrder.orderId === orderId) {
-          log.warn(`Clearing filled buy order from state: ${orderId}`);
+          this.logger.warn(`Clearing filled buy order from state: ${orderId}`);
           this.state.buyOrder = null;
         }
       } else {
         if (this.state.sellOrder && this.state.sellOrder.orderId === orderId) {
-          log.warn(`Clearing filled sell order from state: ${orderId}`);
+          this.logger.warn(`Clearing filled sell order from state: ${orderId}`);
           this.state.sellOrder = null;
         }
       }
 
       // Wait 10 seconds before replacing order to let market stabilize
       // This helps avoid repeat fills during rapid price movements
-      log.warn(`⏳ Waiting 10 seconds for market to stabilize before replacing order...`);
+      this.logger.warn(`⏳ Waiting 10 seconds for market to stabilize before replacing order...`);
       await new Promise(resolve => setTimeout(resolve, 10000));
 
       // Check if bot is still running and hasn't been stopped during the wait
       if (!this.state.isRunning || this.stopRequested) {
-        log.warn('Bot stopped during fill processing, skipping order replacement');
+        this.logger.warn('Bot stopped during fill processing, skipping order replacement');
         return;
       }
 
       // Verify position is still zero before placing new orders
       const currentPosition = await this.orderManager.getCurrentPosition();
       if (currentPosition.abs().gte(new Decimal('0.00001'))) {
-        log.error(`⚠️⚠️⚠️ NON-ZERO POSITION after fill processing: ${currentPosition} BTC`);
+        this.logger.error(`⚠️⚠️⚠️ NON-ZERO POSITION after fill processing: ${currentPosition} BTC`);
         await this.closeDetectedPosition(currentPosition);
         return;
       }
 
       // Replace the filled order with fresh mark price from REST API
       // IMPORTANT: Use fresh mark price from REST API to avoid placing orders at stale prices
-      log.warn(`🔄 Replacing ${side.toUpperCase()} order with fresh mark price...`);
+      this.logger.warn(`🔄 Replacing ${side.toUpperCase()} order with fresh mark price...`);
       await this.replaceOrder(side === 'buy' ? 'buy' : 'sell', true);
 
       this.emit('trade_executed', { side, qty, price: price.toString() });
 
     } catch (error: any) {
-      log.error(`Error handling order filled: ${error.message}`);
+      this.logger.error(`Error handling order filled: ${error.message}`);
       console.error(error.stack);
     } finally {
       // Always clear the flag, even if an error occurred
@@ -808,22 +829,22 @@ export class MakerPointsBot extends EventEmitter {
       const position = await this.client.getPosition(this.config.trading.symbol);
 
       if (position.abs().gt(0)) {
-        log.warn(`Existing position detected: ${position} BTC`);
+        this.logger.warn(`Existing position detected: ${position} BTC`);
         await telegram.warning(`Existing position: ${position} BTC, closing...`);
 
         const side = position.gt(0) ? 'sell' : 'buy';
         const closed = await this.orderManager.closePosition(position.abs(), side);
 
         if (closed) {
-          log.info('✅ Existing position closed');
+          this.logger.info('✅ Existing position closed');
         } else {
-          log.error('Failed to close existing position!');
+          this.logger.error('Failed to close existing position!');
           throw new Error('Failed to close existing position');
         }
       }
 
     } catch (error: any) {
-      log.error(`Error ensuring zero position: ${error.message}`);
+      this.logger.error(`Error ensuring zero position: ${error.message}`);
       throw error;
     }
   }

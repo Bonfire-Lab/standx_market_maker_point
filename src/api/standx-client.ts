@@ -1,17 +1,38 @@
-import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import Decimal from 'decimal.js';
 import { StandXAuth } from './standx-auth';
 import { OrderInfo, OrderResult, ContractInfo, OrderSide } from '../types';
 
 /**
+ * HTTP fetch helper using Bun's native fetch
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const { timeout = 10000, ...fetchOptions } = options;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
  * StandX REST API Client
- * Handles all HTTP API calls to StandX
+ * Handles all HTTP API calls to StandX using Bun's native fetch
  */
 export class StandXClient {
   private auth: StandXAuth;
   private baseUrl: string;
-  private client: AxiosInstance;
   private sessionId: string;
   private tickSize: Decimal = Decimal('0.1');
   private contractId: string = '';
@@ -20,11 +41,6 @@ export class StandXClient {
     this.auth = auth;
     this.baseUrl = 'https://perps.standx.com';
     this.sessionId = uuidv4();
-
-    this.client = axios.create({
-      timeout: 10000,
-      httpsAgent: undefined // Disable SSL verification for now
-    });
   }
 
   /**
@@ -41,8 +57,16 @@ export class StandXClient {
    */
   async getContractInfo(symbol: string): Promise<ContractInfo> {
     try {
-      const response = await this.client.get(`${this.baseUrl}/api/query_symbol_info`);
-      const data = response.data;
+      const url = new URL(`${this.baseUrl}/api/query_symbol_info`);
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      const data = await response.json();
 
       if (!Array.isArray(data)) {
         throw new Error('Invalid symbol info response');
@@ -108,16 +132,18 @@ export class StandXClient {
       const payload = JSON.stringify(params);
       const headers = this.buildHeaders(payload, timestamp);
 
-      const response = await this.client.post(
-        `${this.baseUrl}/api/new_order`,
-        payload,
-        { headers }
-      );
+      const response = await fetchWithTimeout(`${this.baseUrl}/api/new_order`, {
+        method: 'POST',
+        headers,
+        body: payload
+      });
 
-      if (response.data.code !== 0) {
+      const result = await response.json();
+
+      if (result.code !== 0) {
         return {
           success: false,
-          errorMessage: response.data.message || 'Unknown error'
+          errorMessage: result.message || 'Unknown error'
         };
       }
 
@@ -156,13 +182,14 @@ export class StandXClient {
       const payload = JSON.stringify(params);
       const headers = this.buildHeaders(payload, timestamp);
 
-      const response = await this.client.post(
-        `${this.baseUrl}/api/cancel_order`,
-        payload,
-        { headers }
-      );
+      const response = await fetchWithTimeout(`${this.baseUrl}/api/cancel_order`, {
+        method: 'POST',
+        headers,
+        body: payload
+      });
 
-      return response.data.message === 'success';
+      const result = await response.json();
+      return result.message === 'success';
     } catch (error) {
       return false;
     }
@@ -182,17 +209,20 @@ export class StandXClient {
         params.order_id = parseInt(orderId);
       }
 
-      const headers = {
+      const headers: Record<string, string> = {
         'Authorization': `Bearer ${this.auth.getAccessToken()}`,
         'x-session-id': this.sessionId
       };
 
-      const response = await this.client.get(`${this.baseUrl}/api/query_order`, {
-        params,
+      const url = new URL(`${this.baseUrl}/api/query_order`);
+      Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
         headers
       });
 
-      const data = response.data;
+      const data = await response.json();
 
       return {
         orderId: data.id?.toString() || orderId,
@@ -214,18 +244,20 @@ export class StandXClient {
    */
   async getOpenOrders(symbol: string): Promise<OrderInfo[]> {
     try {
-      const headers = {
+      const headers: Record<string, string> = {
         'Authorization': `Bearer ${this.auth.getAccessToken()}`,
         'x-session-id': this.sessionId
       };
 
-      const response = await this.client.get(`${this.baseUrl}/api/query_open_orders`, {
-        params: { symbol },
+      const url = new URL(`${this.baseUrl}/api/query_open_orders`);
+      url.searchParams.append('symbol', symbol);
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
         headers
       });
 
-      // API returns { code, message, result: [...] }
-      const data = response.data;
+      const data = await response.json();
       const orders = data.result || data;
 
       if (!Array.isArray(orders)) {
@@ -252,17 +284,20 @@ export class StandXClient {
    */
   async getPosition(symbol: string): Promise<Decimal> {
     try {
-      const headers = {
+      const headers: Record<string, string> = {
         'Authorization': `Bearer ${this.auth.getAccessToken()}`,
         'x-session-id': this.sessionId
       };
 
-      const response = await this.client.get(`${this.baseUrl}/api/query_positions`, {
-        params: { symbol },
+      const url = new URL(`${this.baseUrl}/api/query_positions`);
+      url.searchParams.append('symbol', symbol);
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
         headers
       });
 
-      const positions = response.data;
+      const positions = await response.json();
       if (!Array.isArray(positions)) {
         return Decimal(0);
       }
@@ -288,11 +323,18 @@ export class StandXClient {
    */
   async getMarkPrice(symbol: string): Promise<Decimal> {
     try {
-      const response = await this.client.get(`${this.baseUrl}/api/query_symbol_price`, {
-        params: { symbol }
+      const url = new URL(`${this.baseUrl}/api/query_symbol_price`);
+      url.searchParams.append('symbol', symbol);
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
       });
 
-      return new Decimal(response.data.mark_price || 0);
+      const data = await response.json();
+      return new Decimal(data.mark_price || 0);
     } catch (error: any) {
       throw new Error(`Failed to fetch mark price: ${error.message}`);
     }
@@ -303,11 +345,17 @@ export class StandXClient {
    */
   async fetchBBOPrices(symbol: string): Promise<[Decimal, Decimal]> {
     try {
-      const response = await this.client.get(`${this.baseUrl}/api/query_depth_book`, {
-        params: { symbol }
+      const url = new URL(`${this.baseUrl}/api/query_depth_book`);
+      url.searchParams.append('symbol', symbol);
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
       });
 
-      const { bids = [], asks = [] } = response.data;
+      const { bids = [], asks = [] } = await response.json();
 
       let bestBid = Decimal(0);
       let bestAsk = Decimal(0);

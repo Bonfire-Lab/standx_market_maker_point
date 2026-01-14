@@ -2,6 +2,7 @@ import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { getConfig } from '../config';
 import path from 'path';
+import { AccountConfig } from '../types';
 
 const logDir = path.join(process.cwd(), 'logs');
 
@@ -19,7 +20,65 @@ function formatTimestampUTC8(): string {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC+8`;
 }
 
-// Define log format
+// Define log format with optional account prefix
+function createLogFormat(accountId?: string): winston.Logform.Format {
+  return winston.format.combine(
+    winston.format.timestamp({ format: formatTimestampUTC8 }),
+    winston.format.errors({ stack: true }),
+    winston.format.printf(({ level, message, timestamp, stack }) => {
+      const prefix = accountId ? `[${accountId}] ` : '';
+      if (stack) {
+        return `${timestamp} ${prefix}[${level.toUpperCase()}]: ${message}\n${stack}`;
+      }
+      return `${timestamp} ${prefix}[${level.toUpperCase()}]: ${message}`;
+    })
+  );
+}
+
+// Create a child logger with account ID
+export function createAccountLogger(account: AccountConfig): winston.Logger & {
+  debug: (message: string) => void;
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+} {
+  const accountId = account.name;
+  const logger = winston.createLogger({
+    level: getConfig().logging.level,
+    format: createLogFormat(accountId),
+    transports: []
+  });
+
+  // Add console transport if enabled
+  if (getConfig().logging.toConsole) {
+    logger.add(new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        createLogFormat(accountId)
+      )
+    }));
+  }
+
+  // Add file transport if enabled - use combined file for all accounts
+  if (getConfig().logging.toFile) {
+    logger.add(new DailyRotateFile({
+      dirname: logDir,
+      filename: 'bot-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '100m',
+      maxFiles: '30d'
+    }));
+  }
+
+  return logger as winston.Logger & {
+    debug: (message: string) => void;
+    info: (message: string) => void;
+    warn: (message: string) => void;
+    error: (message: string) => void;
+  };
+}
+
+// Create default logger instance (no account prefix)
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: formatTimestampUTC8 }),
   winston.format.errors({ stack: true }),
@@ -31,7 +90,6 @@ const logFormat = winston.format.combine(
   })
 );
 
-// Create logger instance
 export const logger = winston.createLogger({
   level: getConfig().logging.level,
   format: logFormat,

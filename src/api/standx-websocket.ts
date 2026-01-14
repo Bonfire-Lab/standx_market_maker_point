@@ -1,8 +1,67 @@
-import WebSocket from 'ws';
 import EventEmitter from 'eventemitter3';
 import { StandXAuth } from './standx-auth';
 import { WSMarkPriceData, WSOrderData, WSPositionData } from '../types';
 import { wsLog } from '../utils/ws-logger';
+
+/**
+ * Bun WebSocket wrapper that provides ws-like interface
+ */
+class BunWebSocket {
+  ws: WebSocket;
+  readyState: number;
+
+  constructor(url: string, options?: { handshakeTimeout?: number }) {
+    this.ws = new WebSocket(url);
+    this.readyState = this.ws.readyState;
+
+    // Forward readyState changes
+    this.ws.addEventListener('open', () => {
+      this.readyState = 1; // OPEN
+    });
+
+    this.ws.addEventListener('close', () => {
+      this.readyState = 3; // CLOSED
+    });
+  }
+
+  on(event: 'open' | 'message' | 'error' | 'close' | 'ping', callback: (...args: any[]) => void): void {
+    switch (event) {
+      case 'open':
+        this.ws.addEventListener('open', callback);
+        break;
+      case 'message':
+        this.ws.addEventListener('message', (event: MessageEvent) => {
+          callback(event.data);
+        });
+        break;
+      case 'error':
+        this.ws.addEventListener('error', callback);
+        break;
+      case 'close':
+        this.ws.addEventListener('close', callback);
+        break;
+      case 'ping':
+        // Bun's WebSocket doesn't emit ping events like ws does
+        // This is a no-op for compatibility
+        break;
+    }
+  }
+
+  send(data: string | Buffer): void {
+    this.ws.send(data);
+  }
+
+  close(): void {
+    this.ws.close();
+  }
+
+  pong(): void {
+    // Bun's WebSocket handles ping/pong automatically
+    // This is a no-op for compatibility
+  }
+
+  static get OPEN(): number { return 1; }
+}
 
 /**
  * StandX WebSocket Client
@@ -10,8 +69,8 @@ import { wsLog } from '../utils/ws-logger';
  */
 export class StandXWebSocket extends EventEmitter {
   private auth: StandXAuth;
-  private marketWS: WebSocket | null = null;
-  private orderWS: WebSocket | null = null;
+  private marketWS: InstanceType<typeof BunWebSocket> | null = null;
+  private orderWS: InstanceType<typeof BunWebSocket> | null = null;
   private marketUrl: string;
   private orderUrl: string;
   private reconnectAttempts: number = 0;
@@ -46,7 +105,7 @@ export class StandXWebSocket extends EventEmitter {
   private connectMarketStream(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.marketWS = new WebSocket(this.marketUrl, { handshakeTimeout: 30000 });
+        this.marketWS = new BunWebSocket(this.marketUrl);
 
         this.marketWS.on('open', () => {
           wsLog.info('Market Stream connected');
@@ -54,7 +113,7 @@ export class StandXWebSocket extends EventEmitter {
           resolve();
         });
 
-        this.marketWS.on('message', (data: WebSocket.Data) => {
+        this.marketWS.on('message', (data: any) => {
           try {
             const message = JSON.parse(data.toString());
             // Only log in debug mode - this fires ~3 times per second
@@ -76,11 +135,6 @@ export class StandXWebSocket extends EventEmitter {
           }
         });
 
-        this.marketWS.on('ping', () => {
-          // Respond to ping with pong
-          this.marketWS?.pong();
-        });
-
       } catch (error) {
         reject(error);
       }
@@ -93,14 +147,14 @@ export class StandXWebSocket extends EventEmitter {
   private connectOrderStream(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.orderWS = new WebSocket(this.orderUrl, { handshakeTimeout: 30000 });
+        this.orderWS = new BunWebSocket(this.orderUrl);
 
         this.orderWS.on('open', () => {
           wsLog.info('Order Stream connected');
           resolve();
         });
 
-        this.orderWS.on('message', (data: WebSocket.Data) => {
+        this.orderWS.on('message', (data: any) => {
           try {
             const message = JSON.parse(data.toString());
             this.handleOrderMessage(message);
@@ -322,7 +376,7 @@ export class StandXWebSocket extends EventEmitter {
    * Check if connected
    */
   isConnected(): boolean {
-    return this.marketWS?.readyState === WebSocket.OPEN ||
-           this.orderWS?.readyState === WebSocket.OPEN;
+    return this.marketWS?.readyState === BunWebSocket.OPEN ||
+           this.orderWS?.readyState === BunWebSocket.OPEN;
   }
 }
