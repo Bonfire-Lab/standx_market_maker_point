@@ -38,11 +38,17 @@ if (!bunPath) {
 }
 
 // Detect if Bun should be used
-const useBun = bunPath && (
-  fs.existsSync(path.join(__dirname, 'bun.lockb')) ||
+let useBun = bunPath && (
   process.env.USE_BUN === 'true' ||
+  fs.existsSync(path.join(__dirname, 'bun.lockb')) ||
   fs.existsSync(path.join(__dirname, 'node_modules/.bun'))
 );
+
+// Force Bun if available and no package-lock.json (Bun project)
+if (!useBun && bunPath && !fs.existsSync(path.join(__dirname, 'package-lock.json'))) {
+  // This is a Bun project (no package-lock.json), use Bun
+  useBun = true;
+}
 
 // Generate log file name from env file (e.g., '.env' -> 'main', '.env.account2' -> 'account2')
 function getLogFilePrefix(envFile) {
