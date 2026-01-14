@@ -1,10 +1,21 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+
+// Try to find Bun executable
+let bunPath = null;
+try {
+  bunPath = execSync('which bun', { encoding: 'utf8' }).trim();
+} catch (e) {
+  // Bun not found
+}
 
 // Detect if Bun should be used
-const useBun = fs.existsSync(path.join(__dirname, 'bun.lockb')) ||
-               process.env.USE_BUN === 'true' ||
-               fs.existsSync(path.join(__dirname, 'node_modules/.bun'));
+const useBun = bunPath && (
+  fs.existsSync(path.join(__dirname, 'bun.lockb')) ||
+  process.env.USE_BUN === 'true' ||
+  fs.existsSync(path.join(__dirname, 'node_modules/.bun'))
+);
 
 // Generate log file name from env file (e.g., '.env' -> 'main', '.env.account2' -> 'account2')
 function getLogFilePrefix(envFile) {
@@ -20,8 +31,9 @@ function createBotConfig(envFile, appName) {
     // Bun configuration - faster startup, lower memory
     return {
       name: appName,
-      script: './src/index.ts',
-      interpreter: 'bun',
+      script: path.join(__dirname, 'src/index.ts'),
+      interpreter: bunPath,
+      interpreter_args: 'src/index.ts',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -46,9 +58,8 @@ function createBotConfig(envFile, appName) {
   // Node.js configuration (fallback)
   return {
     name: appName,
-    script: './src/index.ts',
+    script: path.join(__dirname, 'dist/index.js'),
     interpreter: 'node',
-    interpreter_args: 'dist/index.js',
     instances: 1,
     autorestart: true,
     watch: false,
@@ -85,7 +96,7 @@ module.exports = {
   apps,
   // Display detected runtime
   __meta: {
-    runtime: useBun ? 'Bun (detected)' : 'Node.js (fallback)',
-    note: 'Bun is automatically detected when bun.lockb exists'
+    runtime: useBun ? `Bun (${bunPath})` : 'Node.js (fallback)',
+    note: 'Bun is automatically detected when bun.lockb exists and bun command is available'
   }
 };
